@@ -1,0 +1,730 @@
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.db.connection import Error, db_cursor, get_db_connection
+from src.utils.netdisk_utils import extract_canonical_resource_key
+
+logger = logging.getLogger(__name__)
+
+
+def insert_resource(record: Dict[str, Any]) -> Optional[int]:
+    """
+    插入一条资源记录，返回新记录的 ID。
+    处理 pan_operator 传入的数据字段。
+    若链接或 file_id 已存在，则安全复用并更新记录。
+    """
+    file_id = record.get("file_id")
+    name = record.get("name") or "未命名资源"
+    share_link = record.get("share_link")
+    cloud_name = record.get("cloud_name", "")
+    resource_type = record.get("type", "")
+    remarks = record.get("remarks", "")
+    account_id = record.get("account_id")
+    is_replaced = record.get("is_replaced", 1)
+    health_status = record.get("health_status", "ok")
+    source_link = record.get('source_link')
+    source_key = record.get('source_item_key') or (extract_canonical_resource_key(source_link) if source_link else None)
+
+    if not share_link:
+        logger.error("插入资源记录失败: share_link 为空")
+        return None
+
+    sql = """
+    INSERT INTO resources (file_id, name, share_link, cloud_name, type, remarks, account_id, is_replaced, health_status, source_link, source_key, checked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """
+    params = (file_id, name, share_link, cloud_name, resource_type, remarks, account_id, is_replaced, health_status, source_link, source_key)
+
+    conn = get_db_connection()
+    if not conn:
+        return None
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql, params)
+        conn.commit()
+        new_id = cursor.lastrowid
+        logger.info(f"成功插入资源记录: {name}, ID: {new_id}")
+        return new_id
+    except Error as err:
+        logger.warning(f"插入资源记录 {name} 异常: {err}，尝试查找并更新已有记录")
+        conn.rollback()
+        try:
+            cur = conn.cursor(as_dict=True)
+            existing = None
+            if source_key:
+                cur.execute("SELECT id FROM resources WHERE source_key = ?", (source_key,))
+                existing = cur.fetchone()
+            if not existing and share_link:
+                cur.execute("SELECT id FROM resources WHERE share_link = ?", (share_link,))
+                existing = cur.fetchone()
+            if not existing and file_id:
+                cur.execute("SELECT id FROM resources WHERE file_id = ?", (file_id,))
+                existing = cur.fetchone()
+
+            if existing:
+                res_id = existing["id"]
+                update_sql = """
+                UPDATE resources
+                SET name = ?, file_id = COALESCE(?, file_id), share_link = ?, cloud_name = ?,
+                    type = COALESCE(NULLIF(?, ''), type), remarks = COALESCE(NULLIF(?, ''), remarks),
+                    account_id = COALESCE(?, account_id),
+                    is_replaced = ?, health_status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """
+                cur.execute(
+                    update_sql,
+                    (name, file_id, share_link, cloud_name, resource_type, remarks, account_id, is_replaced, health_status, res_id),
+                )
+                conn.commit()
+                logger.info(f"成功更新已有资源记录: ID={res_id}, 名称='{name}'")
+                return res_id
+        except Exception as update_err:
+            logger.error(f"更新已有资源记录失败: {update_err}")
+            conn.rollback()
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def query_file_id_by_share_link(share_link: str) -> Optional[str]:
+    """根据分享链接查询 file_id，用于 pan_operator。"""
+    sql = "SELECT file_id FROM resources WHERE share_link = ?"
+    with db_cursor() as cursor:
+        if cursor is None:
+            return None
+        cursor.execute(sql, (share_link,))
+        row = cursor.fetchone()
+        if row:
+            file_id = row[0]
+            logger.info(f"根据分享链接 {share_link} 查询到的 file_id 是: {file_id}")
+            return file_id
+        logger.error(f"未找到与分享链接 {share_link} 对应的 file_id")
+        return None
+
+
+def get_resource_by_share_link(share_link: str) -> Optional[Dict[str, Any]]:
+    """根据分享链接查询完整资源记录。"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor(as_dict=True)
+        sql = "SELECT id, file_id, name, share_link, cloud_name, type, remarks, account_id, is_replaced, source_link, source_key FROM resources WHERE share_link = ? OR source_key = ? ORDER BY is_replaced DESC LIMIT 1"
+        cursor.execute(sql, (share_link, extract_canonical_resource_key(share_link)))
+        return cursor.fetchone()
+    except Error as err:
+        logger.error(f"根据分享链接查询资源失败: {err}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def delete_by_share_link(share_link: str) -> int:
+    """根据分享链接删除资源记录，返回受影响行数。"""
+    sql = "DELETE FROM resources WHERE share_link = ?"
+    with db_cursor() as cursor:
+        if cursor is None:
+            return 0
+        cursor.execute(sql, (share_link,))
+        rows = cursor.rowcount
+        if rows > 0:
+            logger.info(f"成功删除分享链接 {share_link} 对应的记录")
+        else:
+            logger.warning(f"未找到分享链接 {share_link} 对应的记录，未执行删除操作")
+        return rows
+
+
+def delete_by_file_id(file_id: str) -> int:
+    """根据网盘 file_id 删除资源记录，返回受影响行数。"""
+    if not file_id:
+        return 0
+    sql = "DELETE FROM resources WHERE file_id = ?"
+    with db_cursor() as cursor:
+        if cursor is None:
+            return 0
+        cursor.execute(sql, (str(file_id),))
+        rows = cursor.rowcount
+        if rows > 0:
+            logger.info(f"成功根据 file_id={file_id} 删除资源记录 ({rows}行)")
+        return rows
+
+
+def random_read_record() -> Optional[Tuple]:
+    """随机读取一条资源记录，返回原始行数据。"""
+    sql = "SELECT * FROM resources ORDER BY RANDOM() LIMIT 1"
+    with db_cursor() as cursor:
+        if cursor is None:
+            return None
+        cursor.execute(sql)
+        row = cursor.fetchone()
+        if row:
+            logger.info(f"随机读取到的资源记录: {row}")
+            return row
+        logger.warning("resources 表中未找到任何记录")
+        return None
+
+
+def update_share_link(resource_id: int, new_share_link: str, file_id: Optional[str] = None, account_id: Optional[int] = None) -> bool:
+    """
+    更新资源的分享链接和 is_replaced 状态（供 pan_operator 使用）。
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT share_link FROM resources WHERE id = ?", (resource_id,))
+        original = cursor.fetchone()
+        source_link = original[0] if original else None
+        source_key = extract_canonical_resource_key(source_link) if source_link else None
+        if file_id:
+            sql = """
+            UPDATE resources
+            SET source_link = COALESCE(source_link, ?), source_key = COALESCE(source_key, ?), share_link = ?, file_id = ?, account_id = ?, is_replaced = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """
+            params = (source_link, source_key, new_share_link, file_id, account_id, resource_id)
+        else:
+            sql = """
+            UPDATE resources
+            SET source_link = COALESCE(source_link, ?), source_key = COALESCE(source_key, ?), share_link = ?, account_id = ?, is_replaced = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """
+            params = (source_link, source_key, new_share_link, account_id, resource_id)
+
+        cursor.execute(sql, params)
+        conn.commit()
+
+        if cursor.rowcount > 0:
+            logger.info(f"资源ID {resource_id} 的分享链接已更新为 {new_share_link}")
+            return True
+        logger.warning(f"未找到资源ID {resource_id}")
+        return False
+    except Error as err:
+        logger.error(f"更新资源分享链接时发生数据库错误: {err}")
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def list_resources(
+    page: int = 1, page_size: int = 10, search: str = "", sort_by: str = "id", order: str = "desc"
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    后台列表分页查询 resources（供 resource_service 调用）。
+    返回: (success, message, data)
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", None
+
+    try:
+        cursor = conn.cursor(as_dict=True)
+
+        where_clause = " WHERE 1=1 "
+        params: List[Any] = []
+
+        if search:
+            where_clause += " AND name LIKE ?"
+            params.append(f"%{search}%")
+
+        count_sql = f"SELECT COUNT(*) AS total FROM resources{where_clause}"
+        cursor.execute(count_sql, params)
+        total_count = cursor.fetchone()["total"]
+
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+
+        allowed_sort_fields = {
+            "id": "id",
+            "name": "name",
+            "cloud_name": "cloud_name",
+            "type": "type",
+            "health_status": "health_status",
+            "is_replaced": "is_replaced",
+            "checked_at": "checked_at",
+            "created_at": "created_at",
+            "updated_at": "updated_at",
+        }
+        sort_field = allowed_sort_fields.get(sort_by, "id")
+        sort_order = "ASC" if order and order.lower() == "asc" else "DESC"
+
+        query_sql = f"""
+        SELECT id, name, share_link, cloud_name, type, remarks, is_replaced, health_status, health_message, checked_at, created_at, updated_at
+        FROM resources
+        {where_clause}
+        ORDER BY {sort_field} {sort_order}, id DESC
+        LIMIT ? OFFSET ?
+        """
+        params.extend([page_size, offset])
+        cursor.execute(query_sql, params)
+        rows = cursor.fetchall()
+
+        for r in rows:
+            if r.get("created_at"):
+                r["created_at"] = str(r["created_at"])
+            if r.get("updated_at"):
+                r["updated_at"] = str(r["updated_at"])
+            if r.get("checked_at"):
+                r["checked_at"] = str(r["checked_at"])
+
+        data = {
+            "items": rows,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "current_page": page,
+            "page_size": page_size,
+        }
+        return True, "", data
+    except Error as err:
+        logger.error(f"获取资源列表时出错: {err}")
+        return False, f"获取资源列表失败: {err}", None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_resource_by_id(resource_id: int) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """根据 ID 获取单个资源详情。"""
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", None
+
+    try:
+        cursor = conn.cursor(as_dict=True)
+        sql = """
+        SELECT id, file_id, name, share_link, cloud_name, type, remarks, account_id, is_replaced, health_status, health_message, checked_at, created_at, updated_at
+        FROM resources WHERE id = ?
+        """
+        cursor.execute(sql, (resource_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False, "资源不存在", None
+
+        if row.get("created_at"):
+            row["created_at"] = str(row["created_at"])
+        if row.get("updated_at"):
+            row["updated_at"] = str(row["updated_at"])
+        if row.get("checked_at"):
+            row["checked_at"] = str(row["checked_at"])
+
+        return True, "", row
+    except Error as err:
+        logger.error(f"获取资源时出错: {err}")
+        return False, f"获取资源失败: {err}", None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def insert_resource_simple(resource_data: Dict[str, Any]) -> Tuple[bool, str, Optional[int]]:
+    """
+    后台新增资源用的简单插入（不含 file_id），供 resource_service 调用。
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", None
+
+    try:
+        cursor = conn.cursor()
+        sql = """
+        INSERT INTO resources (name, share_link, cloud_name, type, remarks, source_link, source_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            resource_data["name"],
+            resource_data["share_link"],
+            resource_data.get("cloud_name", ""),
+            resource_data.get("type", ""),
+            resource_data.get("remarks", ""),
+            resource_data["share_link"],
+            extract_canonical_resource_key(resource_data["share_link"]),
+        )
+        cursor.execute(sql, params)
+        conn.commit()
+        new_id = cursor.lastrowid
+        logger.info(f"成功直接添加资源到数据库，标题: {resource_data['name']}")
+        return True, "资源添加成功", new_id
+    except Error as err:
+        logger.error(f"添加资源到数据库时出错: {err}")
+        conn.rollback()
+        if "UNIQUE constraint failed" in str(err):
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM resources WHERE share_link = ? OR source_key = ?", (resource_data["share_link"], extract_canonical_resource_key(resource_data["share_link"])))
+                row = cur.fetchone()
+                cur.close()
+                if row:
+                    logger.info(f"资源链接已存在，复用现有记录 ID: {row[0]}")
+                    return True, "资源链接已存在", row[0]
+            except Exception as query_err:
+                logger.error(f"查询重复记录 ID 失败: {query_err}")
+        return False, f"资源添加失败: {err}", None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def update_resource_basic_info(resource_id: int, resource_data: Dict[str, Any]) -> Tuple[bool, str]:
+    """更新资源基础信息（标题、云盘名称、类型、备注和分享链接）。"""
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败"
+
+    try:
+        cursor = conn.cursor()
+        check_sql = "SELECT id FROM resources WHERE id = ?"
+        cursor.execute(check_sql, (resource_id,))
+        if not cursor.fetchone():
+            return False, "资源不存在"
+
+        sql = """
+        UPDATE resources
+        SET name = ?, share_link = ?, cloud_name = ?, type = ?, remarks = ?
+        WHERE id = ?
+        """
+        params = (
+            resource_data["name"],
+            resource_data.get("share_link", ""),
+            resource_data.get("cloud_name", ""),
+            resource_data.get("type", ""),
+            resource_data.get("remarks", ""),
+            resource_id,
+        )
+        cursor.execute(sql, params)
+        conn.commit()
+        logger.info(f"成功更新资源，ID: {resource_id}")
+        return True, "资源更新成功"
+    except Error as err:
+        logger.error(f"更新资源时出错: {err}")
+        conn.rollback()
+        return False, f"资源更新失败: {err}"
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def delete_resource_by_id(resource_id: int) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    根据 ID 删除资源，同时返回被删除记录的 share_link 和 file_id，
+    以便 resource_service / pan_operator 调用 del_share 使用。
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", None
+
+    try:
+        cursor = conn.cursor(as_dict=True)
+
+        check_sql = "SELECT share_link, file_id FROM resources WHERE id = ?"
+        cursor.execute(check_sql, (resource_id,))
+        resource = cursor.fetchone()
+        if not resource:
+            return False, "资源不存在", None
+
+        delete_sql = "DELETE FROM resources WHERE id = ?"
+        cursor.execute(delete_sql, (resource_id,))
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            return False, "删除资源失败，请检查资源是否存在", None
+
+        logger.info(f"成功删除资源，ID: {resource_id}")
+        return True, "资源删除成功", resource
+    except Error as err:
+        logger.error(f"删除资源时出错: {err}")
+        conn.rollback()
+        return False, f"资源删除失败: {err}", None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def search_resources_by_title_terms(terms: List[str]) -> List[Tuple]:
+    """
+    根据标题中的任一搜索词搜索资源（用于搜索服务）。
+    返回: [(name, share_link, cloud_name, created_at), ...]
+    """
+    clean_terms = [str(term).strip() for term in terms if str(term).strip()]
+    if not clean_terms:
+        return []
+
+    conditions = " OR ".join("name LIKE ?" for _ in clean_terms)
+    sql = f"SELECT name, share_link, cloud_name, created_at FROM resources WHERE {conditions}"
+    conn = get_db_connection()
+    if not conn:
+        return []
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, [f"%{term}%" for term in clean_terms])
+        results = cursor.fetchall()
+        return results
+    except Error as err:
+        logger.error(f"搜索资源时出错: {err}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def search_resources_advanced(
+    name: str = "", cloud_name: str = "", resource_type: str = "", limit: int = 100, sort: str = "default"
+) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    """
+    高级搜索资源（通过名称、云名称或类型）。
+    返回: (success, message, results)
+    """
+    if not any([name, cloud_name, resource_type]):
+        return False, "至少需要提供 name、cloud_name 或 type 中的一个参数", []
+
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", []
+
+    try:
+        cursor = conn.cursor(as_dict=True)
+
+        conditions = []
+        params = []
+
+        if name:
+            conditions.append("name LIKE ?")
+            params.append(f"%{name}%")
+
+        if cloud_name:
+            conditions.append("cloud_name LIKE ?")
+            params.append(f"%{cloud_name}%")
+
+        if resource_type:
+            conditions.append("type LIKE ?")
+            params.append(f"%{resource_type}%")
+
+        base_query = "SELECT id, name, share_link, cloud_name, type, remarks FROM resources"
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        
+        # 根据sort参数确定排序规则
+        if sort == "asc":
+            order_clause = " ORDER BY id ASC"
+        elif sort == "desc":
+            order_clause = " ORDER BY id DESC"
+        elif sort == "random":
+            order_clause = " ORDER BY RANDOM()"
+        else:  # default
+            order_clause = " ORDER BY created_at DESC"
+            
+        limit_clause = " LIMIT ?"
+
+        sql = base_query + where_clause + order_clause + limit_clause
+        params.append(limit)
+
+        cursor.execute(sql, params)
+        results = cursor.fetchall()
+
+        return True, "", results
+
+    except Error as err:
+        logger.error(f"数据库查询错误: {err}")
+        return False, f"数据库查询错误: {err}", []
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def list_expired_resources(days: Optional[int] = None, minutes: Optional[int] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    """查询创建时间超过指定分钟或天数的资源记录（用于存储自动优化与旧资源清理）。"""
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor(as_dict=True)
+        if minutes is not None:
+            sql = """
+            SELECT id, file_id, name, share_link, cloud_name, type, remarks, account_id, created_at
+            FROM resources
+            WHERE datetime(created_at) < datetime('now', '-' || ? || ' minutes')
+            ORDER BY created_at ASC
+            LIMIT ?
+            """
+            cursor.execute(sql, (int(minutes), int(limit)))
+        else:
+            days_val = int(days) if days is not None else 15
+            sql = """
+            SELECT id, file_id, name, share_link, cloud_name, type, remarks, account_id, created_at
+            FROM resources
+            WHERE datetime(created_at) < datetime('now', '-' || ? || ' days')
+            ORDER BY created_at ASC
+            LIMIT ?
+            """
+            cursor.execute(sql, (days_val, int(limit)))
+        rows = cursor.fetchall()
+        return rows or []
+    except Error as err:
+        logger.error(f"查询过期资源记录失败: {err}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def count_expired_resources(days: Optional[int] = None, minutes: Optional[int] = None) -> int:
+    """统计创建时间超过指定分钟或天数的资源记录数量。"""
+    conn = get_db_connection()
+    if not conn:
+        return 0
+    try:
+        cursor = conn.cursor(as_dict=True)
+        if minutes is not None:
+            sql = """
+            SELECT COUNT(*) AS total
+            FROM resources
+            WHERE datetime(created_at) < datetime('now', '-' || ? || ' minutes')
+            """
+            cursor.execute(sql, (int(minutes),))
+        else:
+            days_val = int(days) if days is not None else 15
+            sql = """
+            SELECT COUNT(*) AS total
+            FROM resources
+            WHERE datetime(created_at) < datetime('now', '-' || ? || ' days')
+            """
+            cursor.execute(sql, (days_val,))
+        row = cursor.fetchone()
+        return int(row["total"]) if row else 0
+    except Error as err:
+        logger.error(f"统计过期资源数量失败: {err}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+def update_resource_health(
+    resource_id: int, health_status: str, health_message: Optional[str] = None
+) -> bool:
+    """更新单个资源的健康状态与检测信息"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        cursor = conn.cursor()
+        sql = """
+        UPDATE resources
+        SET health_status = ?, health_message = ?, checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """
+        cursor.execute(sql, (health_status, health_message, resource_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Error as err:
+        logger.error(f"更新资源健康状态失败 (ID={resource_id}): {err}")
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_resources_for_audit(
+    resource_ids: Optional[List[int]] = None, limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    获取待检测健康状态的资源列表。
+    若指定 resource_ids 则按 ID 列表获取；否则优先获取未检测或最久未检测的资源。
+    """
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor(as_dict=True)
+        if resource_ids:
+            placeholders = ",".join(["?"] * len(resource_ids))
+            sql = f"""
+            SELECT id, name, share_link, cloud_name, type, health_status, health_message, checked_at
+            FROM resources
+            WHERE id IN ({placeholders})
+            LIMIT ?
+            """
+            params = list(resource_ids) + [int(limit)]
+            cursor.execute(sql, params)
+        else:
+            sql = """
+            SELECT id, name, share_link, cloud_name, type, health_status, health_message, checked_at
+            FROM resources
+            ORDER BY CASE WHEN checked_at IS NULL THEN 0 ELSE 1 END, checked_at ASC, id ASC
+            LIMIT ?
+            """
+            cursor.execute(sql, (int(limit),))
+        rows = cursor.fetchall()
+        for r in rows:
+            if r.get("checked_at"):
+                r["checked_at"] = str(r["checked_at"])
+        return rows or []
+    except Error as err:
+        logger.error(f"获取待巡检资源失败: {err}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_dead_resources(limit: int = 100) -> List[Dict[str, Any]]:
+    """获取健康状态为 bad 的失效资源列表"""
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor(as_dict=True)
+        sql = """
+        SELECT id, file_id, name, share_link, cloud_name, type, remarks, health_status, health_message, checked_at
+        FROM resources
+        WHERE health_status = 'bad'
+        ORDER BY id ASC
+        LIMIT ?
+        """
+        cursor.execute(sql, (int(limit),))
+        return cursor.fetchall() or []
+    except Error as err:
+        logger.error(f"获取失效资源列表失败: {err}")
+        return []
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def count_resources_by_health() -> Dict[str, int]:
+    """统计各健康状态的资源数量汇总"""
+    conn = get_db_connection()
+    if not conn:
+        return {"total": 0, "ok": 0, "bad": 0, "locked": 0, "uncertain": 0, "unknown": 0}
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(
+            "SELECT health_status, COUNT(*) as count FROM resources GROUP BY health_status"
+        )
+        rows = cursor.fetchall()
+        stats = {"total": 0, "ok": 0, "bad": 0, "locked": 0, "uncertain": 0, "unknown": 0}
+        for r in rows:
+            status = r.get("health_status") or "unknown"
+            cnt = int(r.get("count", 0))
+            stats["total"] += cnt
+            if status in stats:
+                stats[status] += cnt
+            else:
+                stats["unknown"] += cnt
+        return stats
+    except Error as err:
+        logger.error(f"统计资源健康状态失败: {err}")
+        return {"total": 0, "ok": 0, "bad": 0, "locked": 0, "uncertain": 0, "unknown": 0}
+    finally:
+        cursor.close()
+        conn.close()
+
+

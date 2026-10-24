@@ -1,0 +1,1421 @@
+/* --- 搜索栏 --- */
+.search-page-wrapper {
+    padding-top: 18px;
+    flex: 1 0 auto;
+}
+
+.search-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.search-hero {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-top: 8px;
+}
+
+.search-hero-image {
+    display: block;
+    width: min(100%, 480px);
+    height: auto;
+    object-fit: contain;
+}
+
+.search-shell,
+.login-panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(18px);
+}
+
+.hero-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(245, 191, 96, 0.14);
+    color: var(--brand);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* --- 搜索持续加载 - 底部悬浮弱提示胶囊 --- */
+.search-status-toast {
+    position: fixed;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1080;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 22px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    box-shadow: 0 10px 28px -4px rgba(245, 158, 11, 0.18),
+                0 4px 14px rgba(15, 23, 42, 0.08);
+    color: #92400e;
+    font-size: 0.88rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.search-status-toast.toast-hidden {
+    opacity: 0;
+    transform: translate(-50%, 18px);
+}
+
+.search-status-toast .spinner-border {
+    width: 0.92rem;
+    height: 0.92rem;
+    border-width: 0.15em;
+    color: #d97706;
+}
+
+.search-shell {
+    position: relative;
+    overflow: hidden;
+    padding: 28px;
+    border-radius: var(--radius-2xl);
+}
+
+.search-shell-intro {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 22px;
+}
+
+.search-shell-title {
+    margin: 16px 0 10px;
+    max-width: 12em;
+    font-size: clamp(2rem, 3vw, 3.2rem);
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    color: var(--text-primary);
+}
+
+.search-shell-description {
+    max-width: 48rem;
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.8;
+    color: var(--text-secondary);
+}
+
+.search-area {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0;
+}
+
+.input-group-custom {
+    width: min(70%, 1080px);
+    margin: 0;
+    padding: 10px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.88));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 18px 42px rgba(15, 23, 42, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 24px;
+    overflow: hidden;
+}
+
+#searchInput {
+    height: 58px;
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    padding-left: 18px;
+    color: var(--text-primary);
+}
+
+#searchInput:focus {
+    box-shadow: none;
+    background: transparent;
+}
+
+#searchButton {
+    width: 58px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #f8ca72, #eeaf46);
+    border: none;
+    color: #1f2937;
+    padding: 0;
+    height: 58px;
+    border-top-left-radius: 0 !important;
+    border-bottom-left-radius: 0 !important;
+    border-top-right-radius: 18px !important;
+    border-bottom-right-radius: 18px !important;
+    box-shadow: 0 14px 30px rgba(245, 191, 96, 0.3);
+    transition: all 0.2s ease;
+}
+
+@keyframes fly-animate {
+    0% {
+        transform: translate(0, 0) rotate(0deg);
+    }
+
+    50% {
+        transform: translate(3px, -3px) rotate(15deg);
+    }
+
+    100% {
+        transform: translate(0, 0) rotate(0deg);
+    }
+}
+
+#searchButton.is-flying i {
+    animation: fly-animate 0.8s ease-in-out infinite;
+}
+
+#searchButton.searching {
+    background: linear-gradient(135deg, #f5bf60, #dd9f31);
+}
+
+#searchButton:hover:not(.searching) {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 36px rgba(245, 191, 96, 0.36);
+}
+
+#searchButton i {
+    font-size: 1.1rem;
+    /* 稍微调大一点点更有力量感 */
+    color: #4A3728;
+    /* 这里替换成我上面建议的颜色，比如深棕色 */
+    transition: color 0.3s ease;
+}
+
+#searchButton:hover i {
+    color: #ffffff;
+}
+
+/* --- 结果区网盘徽章专属品牌配色（低饱和底色 + 品牌主色字，精致高辨识度） --- */
+/* 1. 国内主流网盘 */
+.netdisk-badge.bg-baidu {
+    background-color: #eaf2fe !important;
+    color: #1e60d5 !important;
+    border-color: rgba(30, 96, 213, 0.15) !important;
+}
+.netdisk-badge.bg-quark {
+    background-color: #fdf0ec !important;
+    color: #d93829 !important;
+    border-color: rgba(217, 56, 41, 0.15) !important;
+}
+.netdisk-badge.bg-aliyun {
+    background-color: #e6f8f3 !important;
+    color: #059669 !important;
+    border-color: rgba(5, 150, 105, 0.15) !important;
+}
+.netdisk-badge.bg-xunlei {
+    background-color: #e6f6f9 !important;
+    color: #0284c7 !important;
+    border-color: rgba(2, 132, 199, 0.15) !important;
+}
+.netdisk-badge.bg-uc {
+    background-color: #fef6e8 !important;
+    color: #d97706 !important;
+    border-color: rgba(217, 119, 6, 0.15) !important;
+}
+.netdisk-badge.bg-123pan {
+    background-color: #f5effe !important;
+    color: #8b5cf6 !important;
+    border-color: rgba(139, 92, 246, 0.15) !important;
+}
+.netdisk-badge.bg-115 {
+    background-color: #fff3ea !important;
+    color: #ea580c !important;
+    border-color: rgba(234, 88, 12, 0.15) !important;
+}
+
+/* 2. 运营商云盘 */
+.netdisk-badge.bg-tianyi {
+    background-color: #edf3ff !important;
+    color: #2563eb !important;
+    border-color: rgba(37, 99, 235, 0.15) !important;
+}
+.netdisk-badge.bg-mobile {
+    background-color: #ecfdf5 !important;
+    color: #16a34a !important;
+    border-color: rgba(22, 163, 74, 0.15) !important;
+}
+.netdisk-badge.bg-unicom {
+    background-color: #fff1f2 !important;
+    color: #e11d48 !important;
+    border-color: rgba(225, 29, 72, 0.15) !important;
+}
+
+/* 3. 国内特色 / 小众网盘 */
+.netdisk-badge.bg-lanzou {
+    background-color: #e0f2fe !important;
+    color: #0369a1 !important;
+    border-color: rgba(3, 105, 161, 0.15) !important;
+}
+.netdisk-badge.bg-ctfile {
+    background-color: #ecfdf5 !important;
+    color: #047857 !important;
+    border-color: rgba(4, 120, 87, 0.15) !important;
+}
+.netdisk-badge.bg-weiyun {
+    background-color: #eff6ff !important;
+    color: #1d4ed8 !important;
+    border-color: rgba(29, 78, 216, 0.15) !important;
+}
+.netdisk-badge.bg-jianguo {
+    background-color: #fcf4ea !important;
+    color: #92400e !important;
+    border-color: rgba(146, 64, 14, 0.15) !important;
+}
+.netdisk-badge.bg-wukong {
+    background-color: #edf2f7 !important;
+    color: #334155 !important;
+    border-color: rgba(51, 65, 85, 0.15) !important;
+}
+.netdisk-badge.bg-kuaitu {
+    background-color: #fdf2f8 !important;
+    color: #db2777 !important;
+    border-color: rgba(219, 39, 119, 0.15) !important;
+}
+.netdisk-badge.bg-guangya {
+    background-color: #fefce8 !important;
+    color: #ca8a04 !important;
+    border-color: rgba(202, 138, 4, 0.18) !important;
+}
+
+/* 4. 海外及跨境网盘 */
+.netdisk-badge.bg-terabox {
+    background-color: #eef2ff !important;
+    color: #4f46e5 !important;
+    border-color: rgba(79, 70, 229, 0.15) !important;
+}
+.netdisk-badge.bg-gdrive {
+    background-color: #e6f4ea !important;
+    color: #137333 !important;
+    border-color: rgba(19, 115, 51, 0.15) !important;
+}
+.netdisk-badge.bg-mega {
+    background-color: #fee2e2 !important;
+    color: #dc2626 !important;
+    border-color: rgba(220, 38, 38, 0.15) !important;
+}
+.netdisk-badge.bg-gofile {
+    background-color: #f3e8ff !important;
+    color: #7c3aed !important;
+    border-color: rgba(124, 58, 237, 0.15) !important;
+}
+.netdisk-badge.bg-onedrive {
+    background-color: #e0f2fe !important;
+    color: #0078d4 !important;
+    border-color: rgba(0, 120, 212, 0.15) !important;
+}
+.netdisk-badge.bg-pikpak {
+    background-color: #fff1eb !important;
+    color: #c2410c !important;
+    border-color: rgba(194, 65, 12, 0.15) !important;
+}
+
+/* 5. P2P 协议链接 & 兜底 */
+.netdisk-badge.bg-magnet {
+    background-color: #f1f5f9 !important;
+    color: #1e293b !important;
+    border-color: rgba(30, 41, 59, 0.18) !important;
+}
+.netdisk-badge.bg-thunder {
+    background-color: #e0f2fe !important;
+    color: #0369a1 !important;
+    border-color: rgba(3, 105, 161, 0.15) !important;
+}
+.netdisk-badge.bg-ed2k {
+    background-color: #f3f4f6 !important;
+    color: #475569 !important;
+    border-color: rgba(71, 85, 105, 0.15) !important;
+}
+.netdisk-badge.bg-other {
+    background-color: #f8fafc !important;
+    color: #64748b !important;
+    border-color: rgba(100, 116, 139, 0.15) !important;
+}
+
+/* 兼容旧版本通用 class */
+.netdisk-badge.bg-purple { background-color: #f5effe !important; color: #8b5cf6 !important; }
+.netdisk-badge.bg-orange { background-color: #fff3ea !important; color: #ea580c !important; }
+.netdisk-badge.bg-teal { background-color: #e6f6f9 !important; color: #0284c7 !important; }
+.netdisk-badge.bg-mid-blue { background-color: #eaf2fe !important; color: #1e60d5 !important; }
+.netdisk-badge.bg-light-green { background-color: #ecfdf5 !important; color: #16a34a !important; }
+.netdisk-badge.bg-salmon { background-color: #fff1eb !important; color: #c2410c !important; }
+.netdisk-badge.bg-deep-violet { background-color: #edf3ff !important; color: #2563eb !important; }
+.netdisk-badge.bg-coral { background-color: #fdf2f8 !important; color: #db2777 !important; }
+.netdisk-badge.bg-navy-blue { background-color: #edf2f7 !important; color: #334155 !important; }
+.netdisk-badge.bg-dark-mint { background-color: #e6f8f3 !important; color: #059669 !important; }
+.netdisk-badge.bg-warm-gold { background-color: #fef6e8 !important; color: #d97706 !important; }
+.netdisk-badge.bg-olive { background-color: #eff4e6 !important; color: #6b7f38 !important; }
+.netdisk-badge.bg-terracotta { background-color: #fdf0ec !important; color: #d93829 !important; }
+
+/* --- 初始提示区域 --- */
+.initial-prompt-area {
+    padding-top: 64px;
+    padding-bottom: 64px;
+    color: var(--text-secondary);
+}
+
+.initial-icon-wrapper {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 76px;
+    height: 76px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(245, 191, 96, 0.16), rgba(247, 222, 164, 0.38));
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    margin-bottom: 18px;
+}
+
+.initial-icon-wrapper i {
+    font-size: 1.75rem;
+    /* color: var(--brand); */
+    color: #b7791f;
+}
+
+.initial-prompt-area h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    /* color: var(--text-secondary) !important; */
+    color: #64748b !important;
+}
+
+
+/* --- 网盘过滤栏 --- */
+#netdisk-filter-bar {
+    padding: 6px 0 12px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+#netdisk-filter-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.88);
+    color: #475569;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    padding: 0 12px;
+    height: 34px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.84rem;
+    line-height: 1;
+    flex-shrink: 0;
+    font-weight: 500;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+}
+
+.filter-btn:hover {
+    color: var(--text-primary);
+    border-color: rgba(245, 191, 96, 0.45);
+    background-color: rgba(255, 255, 255, 0.98);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
+}
+
+.filter-btn:active {
+    transform: translateY(0);
+}
+
+.filter-btn.active {
+    background: linear-gradient(135deg, rgba(245, 191, 96, 0.24), rgba(245, 191, 96, 0.14));
+    color: #b7791f;
+    border-color: rgba(245, 191, 96, 0.5);
+    font-weight: 600;
+    box-shadow: 0 3px 10px rgba(245, 191, 96, 0.2);
+}
+
+.filter-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background: rgba(148, 163, 184, 0.14);
+    color: #64748b;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.filter-btn:hover .filter-count {
+    background: rgba(148, 163, 184, 0.24);
+    color: #334155;
+}
+
+.filter-btn.active .filter-count {
+    background: rgba(222, 159, 45, 0.25);
+    color: #966110;
+}
+
+.filter-and-count-container {
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.filter-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.filter-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.result-count {
+    flex: 0 0 auto;
+    color: #334155;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.filter-toggle-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border-radius: 9999px;
+    padding: 7px 16px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #475569;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    backdrop-filter: blur(8px);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.filter-toggle-button:hover,
+.filter-toggle-button:focus {
+    color: #0f172a;
+    border-color: rgba(245, 191, 96, 0.45);
+    background-color: #ffffff;
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
+    transform: translateY(-1px);
+}
+
+.filter-toggle-button.has-active-filters {
+    color: #b7791f;
+    background: rgba(255, 248, 235, 0.9);
+    border-color: rgba(245, 191, 96, 0.5);
+    font-weight: 600;
+}
+
+.advanced-filter-panel {
+    padding: 16px 20px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%);
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.04), 0 4px 10px -2px rgba(15, 23, 42, 0.02);
+    backdrop-filter: blur(12px);
+    margin-top: 8px;
+}
+
+.advanced-filter-grid {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.filter-input-wrapper {
+    flex: 1 1 240px;
+    min-width: 220px;
+    display: flex;
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    border-radius: 14px;
+    padding: 4px 14px;
+    transition: all 0.2s ease;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.filter-input-wrapper:focus-within {
+    border-color: #f5bf60;
+    box-shadow: 0 0 0 3px rgba(245, 191, 96, 0.18);
+    background: #ffffff;
+}
+
+.filter-input-icon {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.88rem;
+    margin-right: 8px;
+}
+
+.filter-input-icon.text-emerald {
+    color: #10b981;
+}
+
+.filter-input-icon.text-rose {
+    color: #f43f5e;
+}
+
+.filter-input-tag {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #64748b;
+    margin-right: 8px;
+    padding-right: 8px;
+    border-right: 1px solid rgba(226, 232, 240, 0.9);
+    white-space: nowrap;
+}
+
+.filter-input-field {
+    border: none !important;
+    background: transparent !important;
+    padding: 6px 0 !important;
+    font-size: 0.84rem;
+    color: #1e293b;
+    box-shadow: none !important;
+    width: 100%;
+}
+
+.filter-input-field::placeholder {
+    color: #94a3b8;
+    font-size: 0.82rem;
+}
+
+.filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.filter-apply-btn {
+    height: 40px;
+    min-width: 90px;
+    padding: 0 18px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #f8ca72, #eeaf46);
+    color: #362511;
+    box-shadow: 0 4px 12px rgba(245, 191, 96, 0.25);
+    transition: all 0.2s ease;
+}
+
+.filter-apply-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(245, 191, 96, 0.35);
+    color: #1a1005;
+}
+
+.filter-reset-btn {
+    height: 40px;
+    padding: 0 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    border-radius: 12px;
+    background: rgba(248, 250, 252, 0.9);
+    color: #64748b;
+    transition: all 0.2s ease;
+}
+
+.filter-reset-btn:hover {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.filter-excel-btn {
+    height: 40px;
+    padding: 0 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 12px;
+    background: rgba(240, 253, 244, 0.9);
+    color: #047857;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.filter-excel-btn:hover {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: rgba(16, 185, 129, 0.6);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.15);
+}
+
+.filter-excel-btn:disabled {
+    opacity: 0.75;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.active-filter-tags {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(226, 232, 240, 0.9);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.active-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.active-filter-chip.chip-include {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.active-filter-chip.chip-exclude {
+    background: rgba(244, 63, 94, 0.1);
+    color: #e11d48;
+    border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.chip-remove {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+}
+
+.chip-remove:hover {
+    opacity: 1;
+}
+
+.view-result-modal {
+    width: 100%;
+    border: none;
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow-float);
+}
+
+#viewResultModal.show {
+    display: grid;
+    align-content: start;
+    justify-items: center;
+    padding-top: 18vh;
+}
+
+#viewResultModal .modal-dialog,
+#viewResultModal .modal-dialog.modal-dialog-centered {
+    width: min(calc(100vw - 32px), 480px);
+    max-width: 480px;
+    min-height: auto;
+    margin: 0 auto;
+    transform: none;
+}
+
+@media (max-width: 768px) {
+    #viewResultModal.show {
+        padding-top: 10vh;
+    }
+}
+
+.view-result-modal .modal-header {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    padding: 1rem 1.4rem;
+}
+
+.view-result-modal .modal-body {
+    padding: 1.25rem 1.4rem 0.5rem;
+}
+
+.view-result-modal .modal-footer {
+    border-top: none;
+    padding: 0.8rem 1.4rem 1.4rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.view-result-loading p {
+    font-size: 0.95rem;
+}
+
+.view-result-field {
+    padding: 14px 16px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.92) 100%);
+}
+
+.view-result-label {
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.view-result-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #1e293b;
+    word-break: break-word;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.view-result-link {
+    display: block;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    word-break: break-all;
+    text-decoration: underline;
+    color: #0284c7;
+}
+
+#copyViewResultButton {
+    min-width: 140px;
+    padding: 8px 22px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#copyViewResultButton:active {
+    transform: scale(0.96);
+}
+
+#copyViewResultButton.btn-copied {
+    background: linear-gradient(135deg, #f3be56, #e6a032) !important;
+    border-color: rgba(222, 159, 45, 0.5) !important;
+    color: #1f2937 !important;
+    box-shadow: 0 8px 20px rgba(238, 175, 70, 0.32) !important;
+    transform: none;
+}
+
+/* --- 搜索结果容器 --- */
+#scrollableResults {
+    position: relative;
+    max-height: 80vh;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    background:
+        radial-gradient(circle at calc(100% + 42px) calc(100% + 56px),
+            rgba(245, 191, 96, 0.11) 0%,
+            rgba(245, 191, 96, 0.06) 18%,
+            rgba(245, 191, 96, 0.025) 32%,
+            transparent 46%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.68));
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    padding: 0 24px;
+    border-radius: 24px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    z-index: 1;
+}
+
+#scrollableResults>* {
+    position: relative;
+    z-index: 1;
+}
+
+.result-item {
+    padding: 14px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.result-info {
+    flex-grow: 1;
+    min-width: 0;
+    text-align: left;
+}
+
+.result-header,
+.result-title-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.result-title,
+.result-url-line {
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
+.result-title {
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.result-url-line {
+    font-size: 0.86rem;
+    color: #64748b;
+    margin-top: 6px;
+}
+
+.result-url-line a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+/* --- Hot 资源定制样式 --- */
+.result-item.hot-result .result-title,
+.result-item.hot-result .result-url-line a {
+    font-size: 0.98rem;
+    font-weight: 700;
+}
+
+.result-item.hot-result .result-title {
+    color: #000 !important;
+}
+
+.result-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: 12px;
+    gap: 10px;
+}
+
+.netdisk-badge {
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    font-weight: 500;
+    border: none !important;
+    box-shadow: none !important;
+    letter-spacing: 0.01em;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    justify-content: center;
+    cursor: default;
+    user-select: none;
+}
+
+.action-btn-wrapper {
+    width: 88px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.result-divider {
+    margin: 0;
+    border-color: rgba(148, 163, 184, 0.14);
+}
+
+.copy-button,
+.view-button {
+    min-width: 86px;
+    height: 34px;
+    padding: 0 10px !important;
+    font-size: 0.82rem !important;
+    white-space: nowrap !important;
+    border-radius: 9999px !important;
+    border: 1px solid rgba(245, 191, 96, 0.45) !important;
+    background: linear-gradient(135deg, rgba(255, 251, 243, 0.98), rgba(254, 243, 199, 0.9)) !important;
+    color: #92400e !important;
+    font-weight: 600 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.12) !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.copy-button:hover,
+.view-button:hover {
+    border-color: rgba(245, 158, 11, 0.7) !important;
+    color: #78350f !important;
+    background: linear-gradient(135deg, #fde68a, #f59e0b) !important;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25) !important;
+    transform: translateY(-1px);
+}
+
+.copy-button.dead-btn,
+.view-button.dead-btn {
+    border: 1px solid rgba(203, 213, 225, 0.6) !important;
+    background: rgba(241, 245, 249, 0.85) !important;
+    color: #64748b !important;
+    box-shadow: none !important;
+    font-weight: 500 !important;
+}
+
+.copy-button.dead-btn:hover,
+.view-button.dead-btn:hover {
+    border-color: rgba(148, 163, 184, 0.6) !important;
+    background: #e2e8f0 !important;
+    color: #334155 !important;
+    box-shadow: none !important;
+    transform: translateY(-1px);
+}
+
+.login-shell {
+    margin-top: 30px;
+    min-height: calc(100vh - 240px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-panel {
+    width: min(100%, 460px);
+    padding: 34px;
+    border-radius: 20px;
+}
+
+.login-copy {
+    margin-bottom: 22px;
+}
+
+.login-title {
+    margin: 16px 0 10px;
+    font-size: 2rem;
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.login-description {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.form-group {
+    margin-bottom: 0;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.form-group input {
+    width: 100%;
+    min-height: 50px;
+    padding: 0 16px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 16px;
+    font-size: 0.98rem;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.96);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: rgba(245, 191, 96, 0.42);
+    box-shadow: 0 0 0 4px rgba(245, 191, 96, 0.12);
+}
+
+.btn-login {
+    width: 100%;
+    min-height: 52px;
+    margin-top: 4px;
+    background: linear-gradient(135deg, #f8ca72, #eeaf46);
+    color: #1f2937;
+    border: none;
+    border-radius: 18px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 16px 34px rgba(245, 191, 96, 0.28);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-login:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 20px 40px rgba(245, 191, 96, 0.34);
+}
+
+.error-message {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border: 1px solid rgba(239, 68, 68, 0.16);
+    border-radius: 16px;
+    background: rgba(254, 242, 242, 0.88);
+    color: #b91c1c;
+    text-align: left;
+    font-weight: 600;
+}
+
+/* 响应式调整 */
+@media (min-width: 769px) {
+    .filter-toolbar {
+        justify-content: space-between;
+    }
+
+    #advanced-filter-bar {
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+    }
+
+    .advanced-filter-group {
+        flex: 1 1 280px;
+        max-width: 420px;
+    }
+
+    .advanced-filter-apply {
+        flex: 0 0 auto;
+    }
+}
+
+@media (max-width: 768px) {
+    .search-page-wrapper {
+        padding-top: 14px;
+    }
+
+    .search-shell,
+    .login-panel {
+        border-radius: 24px;
+    }
+
+    .search-shell {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+
+    .search-layout {
+        gap: 14px;
+    }
+
+    .search-hero {
+        padding-top: 0;
+    }
+
+    .search-hero-image {
+        width: min(100%, 280px);
+    }
+
+    .input-group-custom {
+        width: 100%;
+        border-radius: 18px;
+        padding: 8px;
+    }
+
+    #searchInput,
+    #searchButton {
+        height: 50px;
+    }
+
+    .result-count {
+        text-align: left;
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.5;
+    }
+
+    .filter-toolbar {
+        align-items: center;
+    }
+
+    .filter-toggle-button {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9999px;
+        font-size: 0.9rem;
+    }
+
+    .filter-excel-btn {
+        width: 38px;
+        height: 38px;
+        min-width: 38px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        font-size: 0.95rem;
+    }
+
+    .filter-toggle-button .btn-text,
+    .filter-excel-btn .btn-text,
+    #hideDeadLinksText {
+        display: none !important;
+    }
+
+    .filter-toggle-button i,
+    .filter-excel-btn i {
+        margin: 0 !important;
+    }
+
+    #advanced-filter-bar {
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .advanced-filter-group {
+        width: 100%;
+        height: auto;
+    }
+
+    .advanced-filter-label {
+        min-width: 72px;
+    }
+
+    .advanced-filter-input {
+        min-height: 38px;
+    }
+
+    .advanced-filter-apply {
+        width: 100%;
+        min-height: 38px;
+    }
+
+    .advanced-filter-panel {
+        padding: 10px;
+        border-radius: 14px;
+    }
+
+    #scrollableResults {
+        padding: 0 16px;
+        border-radius: 18px;
+    }
+
+    .result-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 0;
+    }
+
+    .result-info {
+        width: 100%;
+    }
+
+    .result-title,
+    .result-url-line {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: initial;
+        word-break: break-word;
+    }
+
+    .result-actions {
+        width: 100%;
+        margin-left: 0;
+        margin-top: 0;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .result-actions .btn {
+        min-width: 86px;
+        white-space: nowrap !important;
+    }
+
+    .login-shell {
+        min-height: auto;
+        padding-top: 24px;
+    }
+
+    .login-panel {
+        padding: 24px 20px;
+    }
+
+    .login-title {
+        font-size: 1.7rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .container-fluid-custom {
+        padding: 0 12px;
+    }
+
+    #netdisk-filter-bar {
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .filter-btn {
+        padding: 6px 14px;
+        font-size: 0.82rem;
+    }
+
+    #scrollableResults {
+        padding: 0 12px;
+    }
+
+    .hero-title {
+        font-size: 1.75rem;
+    }
+
+    .search-shell-title {
+        font-size: 1.75rem;
+    }
+
+    .result-title {
+        font-size: 0.98rem;
+    }
+
+    .result-url-line {
+        font-size: 0.82rem;
+    }
+
+    .netdisk-badge {
+        font-size: 0.72rem;
+        padding: 4px 9px;
+    }
+}
+
+/* --- 网盘链接健康测活状态徽章与失效过滤 --- */
+.link-health-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    height: 22px;
+    text-align: center;
+    border: none !important;
+    cursor: default;
+    user-select: none;
+}
+
+.link-health-badge.badge-ok {
+    background: rgba(16, 185, 129, 0.08);
+    color: #059669;
+}
+
+.link-health-badge.badge-bad {
+    background: rgba(244, 63, 94, 0.08);
+    color: #e11d48;
+}
+
+.link-health-badge.badge-locked {
+    background: rgba(245, 158, 11, 0.08);
+    color: #d97706;
+}
+
+.link-health-badge.badge-checking,
+.link-health-badge.badge-uncertain {
+    background: rgba(100, 116, 139, 0.06);
+    color: #64748b;
+}
+
+/* 失效/死链条目视觉置灰与弱化 (淡雾灰标题，彻底隐藏操作按钮，自然融入整体) */
+.result-item.is-dead-link {
+    background: transparent;
+    border-left: none;
+    padding: 14px 0;
+    margin: 0;
+    opacity: 0.75;
+    transition: all 0.2s ease;
+}
+
+.result-item.is-dead-link:hover {
+    opacity: 0.9;
+}
+
+.result-item.is-dead-link .result-title {
+    color: #94a3b8 !important;
+    font-weight: 500;
+}
+
+.result-item.is-dead-link .result-url-line,
+.result-item.is-dead-link .result-url-line a {
+    color: #cbd5e1 !important;
+}
+
+.result-item.is-dead-link .netdisk-badge {
+    opacity: 0.65;
+    filter: grayscale(30%);
+}
+
+#hideDeadLinksToggle.active {
+    background: rgba(16, 185, 129, 0.14);
+    color: #059669;
+    border-color: rgba(16, 185, 129, 0.45);
+    font-weight: 600;
+}

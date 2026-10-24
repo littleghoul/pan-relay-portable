@@ -1,0 +1,1 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.panrelay.portable.tests"><uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/><application android:label="Pan Relay tests"/><instrumentation android:name="com.panrelay.portable.RuntimeChecks" android:targetPackage="com.panrelay.portable"/></manifest>

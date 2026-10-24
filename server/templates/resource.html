@@ -1,0 +1,397 @@
+{% extends "admin_layout.html" %}
+{% set active_page = 'resources' %}
+
+{% block head %}
+    {{ super() }}
+    <title>Pan-Relay - 我的资源管理</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/resource.css') }}">
+{% endblock %}
+
+{% block content %}
+    {% macro resource_type_select(id, default_value='') %}
+        <select class="form-control" id="{{ id }}">
+            <option value="">请选择类型（可选）</option>
+            <option value="电影" {% if default_value == '电影' %}selected{% endif %}>电影</option>
+            <option value="电视剧" {% if default_value == '电视剧' %}selected{% endif %}>电视剧</option>
+            <option value="音乐" {% if default_value == '音乐' %}selected{% endif %}>音乐</option>
+            <option value="软件" {% if default_value == '软件' %}selected{% endif %}>软件</option>
+            <option value="图片" {% if default_value == '图片' %}selected{% endif %}>图片</option>
+            <option value="游戏" {% if default_value == '游戏' %}selected{% endif %}>游戏</option>
+            <option value="素材" {% if default_value == '素材' %}selected{% endif %}>素材</option>
+            <option value="教程" {% if default_value == '教程' %}selected{% endif %}>教程</option>
+            <option value="文档" {% if default_value == '文档' %}selected{% endif %}>文档</option>
+            <option value="其他" {% if default_value == '其他' %}selected{% endif %}>其他</option>
+        </select>
+    {% endmacro %}
+
+    <div class="admin-container">
+        <!-- Page Header (ucmao admin_modern style) -->
+        <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+                <h1 class="text-xl font-bold tracking-tight text-slate-900">我的资源管理</h1>
+                <p class="text-xs text-slate-500 mt-0.5">维护私有入库资源池，支持分页检索、一键复制、批量导入与自动转存</p>
+            </div>
+            <div class="flex items-center space-x-2.5 flex-wrap">
+                <div class="stats-bar">
+                    <div class="stat-item">
+                        <span class="stat-label">入库资源</span>
+                        <span class="stat-value" id="kpiResourceTotal">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">失效资源</span>
+                        <span class="stat-value" id="kpiHealthStats">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 数据管理面板 -->
+        <section class="admin-panel">
+            <div class="admin-panel-header">
+                <div class="admin-panel-title-area">
+                    <h2 class="admin-panel-title">
+                        <i class="fas fa-list-ul text-slate-400"></i> 资源列表
+                    </h2>
+                    <p class="admin-panel-desc">按关键词检索、单条维护或批量导出清理已有入库资源。</p>
+                </div>
+                <div class="flex items-center space-x-2.5 flex-wrap gap-y-2">
+                    <div class="admin-search-wrap">
+                        <i class="fas fa-search"></i>
+                        <input type="text" class="admin-search-input" id="searchInput" placeholder="按资源标题回车或输入搜索...">
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap" style="min-width:0;max-width:100%">
+                        <button type="button" class="btn btn-secondary btn-sm" id="personalExcelExportBtn">导出我的分享 Excel</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="crossTransferStart">所选资源生成双盘分享</button>
+                        <span id="personalExcelExportStatus" class="text-xs text-slate-500" style="flex-basis:100%;order:99;overflow-wrap:anywhere" role="status" aria-live="polite"></span>
+                        <a id="personalExcelDownload" class="btn btn-outline-primary btn-sm" hidden download="personal-shares.xlsx">再次下载 Excel</a>
+                        <button class="btn btn-secondary btn-sm" id="auditAllResourcesBtn" type="button" title="对库内资源执行健康巡检测活">
+                            <i class="fas fa-stethoscope text-[10px]"></i> 批量巡检
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" id="cleanupDeadResourcesBtn" type="button" title="一键清理标记为失效的死链与空资源">
+                            <i class="fas fa-broom text-[10px]"></i> 清理失效
+                        </button>
+                        <button class="btn btn-primary btn-sm" id="addResourceBtn" data-ui-modal-target="#addResourceModal">
+                            <i class="fas fa-plus text-[10px]"></i> 新增入库
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="batchImportResourceBtn" data-ui-modal-target="#batchAddResourceModal">
+                            <i class="fas fa-layer-group text-[10px]"></i> 智能识别导入
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="padding:12px;overflow:auto" id="crossTransferPanel">
+                <strong>双盘传输任务</strong> <a href="/admin/transfers" class="btn btn-secondary btn-sm">查看全部任务与结果</a>
+                <p class="text-xs text-slate-500">先勾选已转存的百度或夸克资源，再点击“所选资源生成双盘分享”。任务完成后，Excel 的“双盘分享”工作表包含两套链接。</p>
+                <div id="crossTransferStatus" role="status" aria-live="polite"></div>
+                <div id="crossTransferJobs"></div>
+            </div>
+            <!-- 底部悬浮批量操作栏 -->
+            <div class="resource-batch-toolbar" id="resourceBatchToolbar" role="toolbar" aria-label="批量操作栏">
+                <div class="resource-batch-summary">
+                    <i class="fas fa-check-circle text-blue-600"></i>
+                    <span>已选 <strong id="selectedResourceCount" class="text-blue-600 font-bold">0</strong> 项</span>
+                    <button class="resource-batch-scope-link" id="resourceScopeToggleLink" type="button" style="display: none;"></button>
+                    <span class="resource-batch-summary-divider"></span>
+                    <button class="resource-batch-btn-clear" id="clearSelectionBtn" type="button" title="清空选择">
+                        <i class="fas fa-times"></i> 清空
+                    </button>
+                </div>
+                <div class="resource-batch-actions">
+                    <button class="btn btn-info btn-sm" id="auditSelectedBtn" type="button" title="巡检所选资源的有效性">
+                        <i class="fas fa-stethoscope"></i> 巡检所选
+                    </button>
+                    <button class="btn btn-primary btn-sm" id="exportSelectedBtn" type="button">
+                        <i class="fas fa-file-export"></i> 导出
+                    </button>
+                    <button class="btn btn-danger btn-sm" id="deleteSelectedBtn" type="button">
+                        <i class="fas fa-trash-alt"></i> 删除
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 表格容器 -->
+            <div class="data-table-shell">
+                <table class="table">
+                    <thead>
+                        <tr class="select-none">
+                            <th style="width: 44px; text-align: center;">
+                                <input class="form-check-input" type="checkbox" id="selectCurrentPageCheckbox" aria-label="选择当前页资源">
+                            </th>
+                            <th style="width: 65px; cursor: pointer;" onclick="handleResourceSort('id')" title="点击按 ID 排序">
+                                ID <span id="resourceSortIconId" class="text-blue-600 font-bold ml-0.5">↓</span>
+                            </th>
+                            <th style="cursor: pointer;" onclick="handleResourceSort('name')" title="点击按标题排序">
+                                标题 <span id="resourceSortIconName" class="text-slate-300 ml-0.5">↕</span>
+                            </th>
+                            <th>链接</th>
+                            <th style="width: 105px; cursor: pointer;" onclick="handleResourceSort('cloud_name')" title="点击按网盘排序">
+                                网盘 <span id="resourceSortIconCloudName" class="text-slate-300 ml-0.5">↕</span>
+                            </th>
+                            <th style="width: 95px; cursor: pointer;" onclick="handleResourceSort('type')" title="点击按类型排序">
+                                类型 <span id="resourceSortIconType" class="text-slate-300 ml-0.5">↕</span>
+                            </th>
+                            <th style="width: 110px; cursor: pointer;" onclick="handleResourceSort('health_status')" title="点击按健康状态排序">
+                                健康状态 <span id="resourceSortIconHealthStatus" class="text-slate-300 ml-0.5">↕</span>
+                            </th>
+                            <th style="width: 95px; cursor: pointer;" onclick="handleResourceSort('is_replaced')" title="点击按同步状态排序">
+                                同步状态 <span id="resourceSortIconIsReplaced" class="text-slate-300 ml-0.5">↕</span>
+                            </th>
+                            <th style="width: 130px; text-align: center;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resourcesTableBody">
+                        <!-- 数据将通过JavaScript动态加载 -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页栏 (全站统一 Slate 规范) -->
+            <div class="px-5 py-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-center gap-2 text-xs text-slate-500">
+                    <span>每页显示</span>
+                    <select id="pageSizeSelect"
+                        class="px-2 py-1 text-xs rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer">
+                        <option value="15" selected>15 条</option>
+                        <option value="30">30 条</option>
+                        <option value="50">50 条</option>
+                        <option value="100">100 条</option>
+                    </select>
+                    <span class="text-slate-400">第 <span id="resourceCurrentPageNum">1</span> / <span id="resourceTotalPageNum">1</span> 页（共 <span id="resourceTotalCountNum">0</span> 条）</span>
+                </div>
+
+                <div class="flex items-center gap-3 flex-wrap">
+                    <div class="flex items-center space-x-1.5" id="pagination">
+                        <!-- Dynamic rendering by JS -->
+                    </div>
+                    <div class="flex items-center gap-1.5 text-xs text-slate-500 border-l border-slate-200 pl-3">
+                        <span>跳至</span>
+                        <input type="number" id="jumpPageInput" min="1" value="1"
+                            class="w-14 px-2 py-1 text-xs text-center rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-blue-500"
+                            onkeydown="if(event.key==='Enter'){handleJumpPage();}">
+                        <span>页</span>
+                        <button type="button" id="jumpPageBtn" onclick="handleJumpPage()"
+                            class="px-2.5 py-1 text-xs rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition cursor-pointer">跳转</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    
+    <!-- 新增入库模态框 -->
+    <div class="modal fade" id="addResourceModal" tabindex="-1" aria-labelledby="addResourceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addResourceModalLabel">
+                        <i class="fas fa-plus-circle text-primary me-1"></i> 新增资源入库
+                    </h5>
+                    <button type="button" class="btn-close" data-ui-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addResourceForm" class="space-y-3.5">
+                        <div>
+                            <label for="resourceName" class="form-label">
+                                资源标题 <span class="text-danger">*</span>
+                            </label>
+                            <input type="text" class="form-control" id="resourceName" placeholder="例如：流浪地球2 4K原画" required>
+                        </div>
+                        <div>
+                            <label for="resourceShareLink" class="form-label">
+                                链接 <span class="text-danger">*</span>
+                            </label>
+                            <input type="text" class="form-control" id="resourceShareLink" placeholder="例如：https://pan.quark.cn/s/..." required>
+                        </div>
+                        <div class="d-none">
+                            <label for="resourceCloudName" class="form-label">云盘名称</label>
+                            <input type="text" class="form-control" id="resourceCloudName">
+                        </div>
+                        <div>
+                            <label for="resourceType" class="form-label">分类类型</label>
+                            {{ resource_type_select('resourceType') }}
+                        </div>
+                        <div>
+                            <label for="resourceRemarks" class="form-label">运营备注</label>
+                            <textarea class="form-control" id="resourceRemarks" rows="2" placeholder="可选填写提取码或特别说明"></textarea>
+                        </div>
+
+                        <!-- 自动转存并入库策略配置 -->
+                        <div class="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <span class="text-xs font-semibold text-slate-700 block">自动转存至我的网盘</span>
+                                    <span class="text-[11px] text-slate-400 font-normal">开启后将自动转存到已配置凭证的网盘并生成专属链接</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+                                    <input type="checkbox" id="singleResourceTransferToggle" onchange="toggleSingleTransferOptions(this.checked)" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <div id="singleTransferOptions" class="d-none pt-2.5 border-t border-slate-200/60">
+                                <div id="singleLinkTransferHint" class="text-xs p-2.5 rounded-lg bg-blue-50/70 text-blue-700 border border-blue-100/80">
+                                    <!-- 动态提示当前链接是否匹配已就绪凭证 -->
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-ui-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="saveResourceBtn" onclick="saveResource()">
+                        <i class="fas fa-save me-1"></i> 直接入库
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑资源模态框 -->
+    <div class="modal fade" id="editResourceModal" tabindex="-1" aria-labelledby="editResourceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editResourceModalLabel">
+                        <i class="fas fa-edit text-primary me-1"></i> 编辑资源
+                    </h5>
+                    <button type="button" class="btn-close" data-ui-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editResourceForm" class="space-y-3.5">
+                        <input type="hidden" id="editResourceId">
+                        <div>
+                            <label for="editResourceName" class="form-label">
+                                资源标题 <span class="text-danger">*</span>
+                            </label>
+                            <input type="text" class="form-control" id="editResourceName" required>
+                        </div>
+                        <div>
+                            <label for="editResourceShareLink" class="form-label">
+                                链接 <span class="text-danger">*</span>
+                            </label>
+                            <input type="text" class="form-control" id="editResourceShareLink" required>
+                        </div>
+                        <div class="d-none">
+                            <label for="editResourceCloudName" class="form-label">云盘名称</label>
+                            <input type="text" class="form-control" id="editResourceCloudName">
+                        </div>
+                        <div>
+                            <label for="editResourceType" class="form-label">分类类型</label>
+                            {{ resource_type_select('editResourceType') }}
+                        </div>
+                        <div>
+                            <label for="editResourceRemarks" class="form-label">运营备注</label>
+                            <textarea class="form-control" id="editResourceRemarks" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-ui-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="updateResourceBtn">
+                        <i class="fas fa-save me-1"></i> 保存修改
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 批量导入/转存资源模态框 -->
+    <div class="modal fade" id="batchAddResourceModal" tabindex="-1" aria-labelledby="batchAddResourceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="batchAddResourceModalLabel">
+                        <i class="fas fa-layer-group text-blue-600 me-1"></i> 智能识别 · 单条 / 批量
+                    </h5>
+                    <button type="button" class="btn-close" data-ui-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="batchAddResourceForm" class="space-y-4">
+                        <div>
+                            <label for="batchResourceContent" class="block text-xs font-semibold text-slate-700 mb-1">粘贴网盘分享文案或链接 <span class="text-rose-500">*</span></label>
+                            <div class="text-slate-500 text-xs mb-2">
+                                单条、多条、百度与夸克分享文案均可粘贴。浏览器本地识别，先预览核对再处理；不支持截图识别。
+                            </div>
+                            <textarea class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all font-mono text-xs text-slate-800" id="batchResourceContent" rows="7" placeholder="通过百度网盘分享的文件：示例资源
+链接：https://pan.baidu.com/s/xxxx
+提取码：1234
+
+资源二
+https://pan.quark.cn/s/xxxx" required></textarea>
+                        </div>
+
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="previewSmartResources()">识别并预览</button>
+                        <div id="smartImportPreview" hidden>
+                            <p id="smartImportSummary" class="text-xs text-slate-600 mb-2" aria-live="polite"></p>
+                            <div style="overflow:auto;max-height:360px">
+                                <table class="table table-sm text-xs"><thead><tr><th>确认</th><th>标题</th><th>链接</th><th>提取码</th><th>网盘</th><th>识别 / 处理结果</th></tr></thead><tbody id="smartImportRows"></tbody></table>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div>
+                                <label for="batchResourceType" class="block text-xs font-semibold text-slate-700 mb-1.5">默认分类类型</label>
+                                {{ resource_type_select('batchResourceType') }}
+                            </div>
+                            <div>
+                                <label for="batchResourceRemarks" class="block text-xs font-semibold text-slate-700 mb-1.5">统一备注说明</label>
+                                <input type="text" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-xs font-medium text-slate-800" id="batchResourceRemarks" placeholder="选填，将附加到每条资源">
+                            </div>
+                        </div>
+
+                        <!-- 自动转存并入库策略配置 -->
+                        <div class="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <span class="text-xs font-semibold text-slate-700 block">自动转存至我的网盘</span>
+                                    <span class="text-[11px] text-slate-400 font-normal">开启后已配置凭证的网盘将自动转存并生成专属链接</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+                                    <input type="checkbox" id="batchResourceTransferToggle" checked onchange="toggleBatchTransferOptions(this.checked)" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <div id="batchTransferOptions" class="d-none pt-2.5 border-t border-slate-200/60 space-y-2">
+                                <div class="flex items-center justify-between text-xs flex-wrap gap-2">
+                                    <div class="flex items-center gap-1.5" id="batchReadyCloudsSummary">
+                                        <span class="text-slate-500 font-medium">就绪转存平台：</span>
+                                        <span class="text-slate-400 text-[11px]">检测中...</span>
+                                    </div>
+                                    <a href="{{ url_for('system_config.system_config_page') }}" target="_blank" class="text-blue-600 hover:underline text-[11px]">
+                                        去配置凭证 &rarr;
+                                    </a>
+                                </div>
+                                <div class="text-[11px] text-slate-400">
+                                    未就绪的平台会提示失败并保留待重试；只入库请关闭自动转存。
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-ui-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="batchSaveResourceBtn">
+                        <i class="fas fa-search me-1"></i> 识别并预览
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 消息容器 -->
+    <div aria-live="polite" aria-atomic="true" id="toastContainer"></div>
+    
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/utils.js') }}?v=2.0.5"></script>
+    <script src="{{ url_for('static', filename='js/share_parser.js') }}?v=20261001-3"></script>
+    <script src="{{ url_for('static', filename='js/resource.js') }}?v=20261001-3"></script>
+    <script src="{{ url_for('static', filename='js/smart_import.js') }}?v=20261001-3"></script>
+    <script src="{{ url_for('static', filename='js/personal_export.js') }}?v=20261001-1"></script>
+    <script src="{{ url_for('static', filename='js/cross_transfer.js') }}?v=20261001-2"></script>
+{% endblock %}
+

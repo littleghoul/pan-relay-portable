@@ -1,0 +1,83 @@
+{% extends "admin_layout.html" %}
+{% set active_page = 'sources' %}
+
+{% block title %}搜索源管理 - Pan-Relay Console{% endblock %}
+
+{% block content %}
+<!-- Page Header (ucmao admin_modern style) -->
+<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div>
+        <h1 class="text-xl font-bold tracking-tight text-slate-900">搜索源管理</h1>
+        <p class="text-xs text-slate-500 mt-0.5">配置第三方 API 接口、Python 采集插件及 Telegram 频道抓取网络</p>
+    </div>
+    <div class="flex items-center space-x-2.5 flex-wrap">
+        <!-- 紧凑运行状态条 -->
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span class="stat-label">API 接口</span>
+                <span class="stat-value" id="kpiApiStat">-- / --</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">插件扩展</span>
+                <span class="stat-value" id="statPluginCounts">-- / --</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Telegram</span>
+                <span class="stat-value" id="kpiTgStatus" style="font-size: 0.8125rem;">--</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 保持 JS 兼容的隐藏辅助元素 -->
+<span id="kpiApiTotal" class="d-none">--</span>
+<span id="kpiApiEnabled" class="d-none">--</span>
+<span id="kpiApiDetail" class="d-none"></span>
+<span id="kpiTgDetail" class="d-none"></span>
+<span id="tabBadgeApi" class="d-none"></span>
+<span id="tabBadgePlugins" class="d-none"></span>
+<span id="tabBadgeTg" class="d-none"></span>
+
+<!-- 分段控制 Tab 导航与右侧全局操作按钮 -->
+<div class="source-tabs-header flex items-center justify-between gap-3">
+    <div class="flex items-center space-x-1">
+        <button class="source-tab-btn {{ 'is-active' if active_tab == 'api' else '' }}" data-tab-target="api" type="button">
+            <i class="fas fa-code"></i> API 搜索源
+        </button>
+        <button class="source-tab-btn {{ 'is-active' if active_tab == 'plugins' else '' }}" data-tab-target="plugins" type="button">
+            <i class="fas fa-puzzle-piece"></i> 插件扩展
+        </button>
+        <button class="source-tab-btn {{ 'is-active' if active_tab == 'telegram' else '' }}" data-tab-target="telegram" type="button">
+            <i class="fab fa-telegram-plane"></i> Telegram 频道
+        </button>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm flex-shrink-0" data-ui-modal-target="#searchSettingsModal" type="button">
+        <i class="fas fa-sliders-h text-[11px] me-1"></i> 搜索调度参数
+    </button>
+</div>
+
+<!-- Tab 内容区域 -->
+<div class="source-tab-content">
+    <div id="tab-pane-api" class="source-tab-pane {{ 'is-active' if active_tab == 'api' else '' }}">
+        {% include "sources/_tab_api.html" %}
+    </div>
+    <div id="tab-pane-plugins" class="source-tab-pane {{ 'is-active' if active_tab == 'plugins' else '' }}">
+        {% include "sources/_tab_plugins.html" %}
+    </div>
+    <div id="tab-pane-telegram" class="source-tab-pane {{ 'is-active' if active_tab == 'telegram' else '' }}">
+        {% include "sources/_tab_telegram.html" %}
+    </div>
+</div>
+
+{% include "sources/_modal_search_scheduler.html" %}
+
+<div aria-live="polite" aria-atomic="true" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/api_config.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/plugin_config.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/search_sources.js') }}"></script>
+{% endblock %}

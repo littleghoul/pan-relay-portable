@@ -1,0 +1,459 @@
+import json
+import logging
+import threading
+import time
+from typing import Any, Dict, List
+
+from src.clients import (
+    AliyunPanClient,
+    BaiduPanClient,
+    QuarkPanClient,
+    UcPanClient,
+    XunleiPanClient,
+    GuangyaPanClient,
+    WukongPanClient,
+    CaiyunPanClient,
+)
+from src.db.resources import (
+    insert_resource,
+    delete_by_share_link,
+    delete_by_file_id,
+    update_share_link,
+    get_resource_by_share_link,
+)
+from src.db.credentials import get_cookie_by_cloud_name
+from src.services.link_checker import check_link, STATE_BAD, STATE_LOCKED
+from src.utils.netdisk_utils import match_netdisk_link, extract_password_from_url, extract_canonical_resource_key
+
+logger = logging.getLogger(__name__)
+
+# 并发转存防击穿互斥锁表与临时转存结果缓存 (URL -> Result Record)
+_TRANSFER_LOCKS: Dict[str, threading.Lock] = {}
+_TRANSFER_LOCKS_MUTEX = threading.Lock()
+_TRANSFERRED_URL_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_transfer_lock(url: str) -> threading.Lock:
+    clean_url = extract_canonical_resource_key(str(url or "").strip())
+    with _TRANSFER_LOCKS_MUTEX:
+        if clean_url not in _TRANSFER_LOCKS:
+            _TRANSFER_LOCKS[clean_url] = threading.RLock()
+        return _TRANSFER_LOCKS[clean_url]
+
+# --- 工具函数：凭证校验 ---
+
+def _parse_xunlei_credential(raw_credential: str) -> Dict[str, str]:
+    if not raw_credential or not raw_credential.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_credential)
+        if isinstance(parsed, dict):
+            return {
+                "refresh_token": str(parsed.get("refresh_token", "")).strip(),
+                "captcha_sign": str(parsed.get("captcha_sign", "")).strip(),
+                "user_id": str(parsed.get("user_id", "")).strip(),
+                "client_id": str(parsed.get("client_id", "")).strip(),
+                "device_id": str(parsed.get("device_id", "")).strip(),
+            }
+    except Exception:
+        pass
+    # 兼容直接存入的纯 refresh_token 字符串
+    return {
+        "refresh_token": raw_credential.strip(),
+        "captcha_sign": "",
+        "user_id": "",
+        "client_id": "",
+        "device_id": "",
+    }
+
+
+def get_and_validate_credential(netdisk_type: str) -> Any:
+    """
+    统一获取并校验云盘凭证。
+    凭证可能是 Cookie，也可能是 refresh_token。
+    """
+    credential = get_cookie_by_cloud_name(netdisk_type)
+    
+    if not credential:
+        logger.error(f"[{netdisk_type}] 操作失败：数据库中未配置凭证。")
+        return ""
+
+    if netdisk_type == "迅雷网盘":
+        parsed_credential = _parse_xunlei_credential(credential)
+        if not parsed_credential.get("refresh_token"):
+            logger.error(f"[{netdisk_type}] 操作失败：凭证缺少 refresh_token。")
+            return {}
+        return parsed_credential
+    
+    min_length_map = {
+        "夸克网盘": 50,
+        "百度网盘": 50,
+        "UC网盘": 50,
+        "阿里云盘": 20,
+        "光鸭云盘": 10,
+        "悟空网盘": 10,
+        "移动云盘": 10,
+    }
+    min_length = min_length_map.get(netdisk_type, 10)
+
+    if len(credential) < min_length:
+        logger.error(f"[{netdisk_type}] 操作失败：凭证长度不足({len(credential)})，可能已失效。")
+        return ""
+        
+    return credential
+
+
+def _normalize_file_id(file_id: Any) -> Any:
+    if isinstance(file_id, list):
+        return json.dumps(file_id, ensure_ascii=False)
+    return file_id
+
+
+def _parse_file_id(file_id: Any) -> Any:
+    if isinstance(file_id, list):
+        return file_id
+    if not isinstance(file_id, str):
+        return file_id
+
+    file_id = file_id.strip()
+    if not file_id:
+        return file_id
+
+    if file_id.startswith("["):
+        try:
+            parsed = json.loads(file_id)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            return file_id
+    return file_id
+
+# --- 核心逻辑：通用网盘操作处理器 ---
+
+def _execute_store(client, share_url, to_pdir_path: str = '/'):
+    """执行单个客户端转存与分享操作"""
+    new_file_id, file_name, new_share_url = client.store(share_url, to_pdir_path)
+    if not new_file_id or not new_share_url:
+        logger.error(f"[{client.__class__.__name__}] 转存或分享接口返回空数据")
+        return None, None, None
+    logger.info(f"[{client.__class__.__name__}] 处理成功: {file_name}")
+    time.sleep(0.5)
+    return new_file_id, file_name, new_share_url
+
+
+def _execute_delete(client, file_id: Any) -> bool:
+    """执行单个客户端删除操作"""
+    if not file_id:
+        logger.error(f"[{client.__class__.__name__}] 删除操作缺失 file_id")
+        return False
+    parsed_file_id = _parse_file_id(file_id)
+    if isinstance(client, BaiduPanClient):
+        target = [parsed_file_id] if isinstance(parsed_file_id, str) else parsed_file_id
+    elif isinstance(client, (AliyunPanClient, UcPanClient, XunleiPanClient, GuangyaPanClient, WukongPanClient, CaiyunPanClient)):
+        target = parsed_file_id if isinstance(parsed_file_id, list) else [parsed_file_id]
+    else:
+        target = parsed_file_id
+    return client.del_file(target)
+
+
+def _handle_netdisk_operation(client_class, client_credential, share_url, to_pdir_path: str = '/', 
+                              operation: str = 'store', file_id: str = None):
+    """
+    通用网盘操作处理器（转存或删除，兼容直接传入 client 实例或 class+credential，方便测试 Mock）。
+    """
+    if hasattr(client_credential, "store") or hasattr(client_credential, "del_file"):
+        client = client_credential
+    else:
+        client = client_class(client_credential)
+    try:
+        if operation == 'store':
+            return _execute_store(client, share_url, to_pdir_path)
+        elif operation == 'delete':
+            return _execute_delete(client, file_id)
+    except Exception as e:
+        logger.exception(f"[{getattr(client_class, '__name__', 'NetdiskClient')}] 接口调用异常: {e}")
+        return (None, None, None) if operation == 'store' else False
+
+
+def _resolve_target_dir(client_or_class, client_credential_or_name=None, target_dir_name: str = "") -> str:
+    """
+    根据配置的目录名称与网盘类型，解析出对应的目标路径/文件夹 ID（兼容直接传入 client 实例或 class+credential）。
+    """
+    # 兼容传入已实例化的 client
+    if hasattr(client_or_class, "store") or hasattr(client_or_class, "del_file"):
+        client = client_or_class
+        client_class = client.__class__
+        target_dir = client_credential_or_name or target_dir_name
+    else:
+        client_class = client_or_class
+        target_dir = target_dir_name
+        try:
+            client = client_class(client_credential_or_name)
+        except Exception:
+            client = None
+
+    if client_class == XunleiPanClient or (client and isinstance(client, XunleiPanClient)):
+        return ""
+
+    if not target_dir or target_dir.strip() in ("", "/"):
+        return "/" if client_class == BaiduPanClient else ("root" if client_class in (AliyunPanClient, CaiyunPanClient) else "0")
+
+    clean_dir = target_dir.strip().strip("/")
+    try:
+        if client and hasattr(client, "get_or_create_dir"):
+            return client.get_or_create_dir(clean_dir)
+    except Exception as exc:
+        logger.error(f"[{client_class.__name__}] 解析目标转存目录失败: {exc}")
+
+    if client_class == BaiduPanClient:
+        return f"/{clean_dir}"
+    return "root" if client_class in (AliyunPanClient, CaiyunPanClient) else "0"
+
+
+
+# --- 业务接口：创建分享 ---
+
+def create_share(share_data):
+    """
+    创建/转存分享链接（支持并发互斥锁防击穿）
+    """
+    try:
+        share_url = (share_data.get('share_url') or '').strip()
+        if not share_url:
+            return None
+
+        title = share_data.get('title', f"资源_{int(time.time())}")
+        save_to_netdisk = share_data.get('save_to_netdisk', {})
+        has_id = 'id' in share_data
+        share_id = share_data.get('id')
+
+        # 1. 匹配网盘类型
+        netdisk_type = match_netdisk_link(share_url)
+        config_map = {
+            "夸克网盘": {"class": QuarkPanClient, "enabled": save_to_netdisk.get('quark', False)},
+            "百度网盘": {"class": BaiduPanClient, "enabled": save_to_netdisk.get('baidu', False)},
+            "阿里云盘": {"class": AliyunPanClient, "enabled": save_to_netdisk.get('aliyun', False)},
+            "UC网盘": {"class": UcPanClient, "enabled": save_to_netdisk.get('uc', False)},
+            "迅雷网盘": {"class": XunleiPanClient, "enabled": save_to_netdisk.get('xunlei', False)},
+            "光鸭云盘": {"class": GuangyaPanClient, "enabled": save_to_netdisk.get('guangya', False)},
+            "悟空网盘": {"class": WukongPanClient, "enabled": save_to_netdisk.get('wukong', False)},
+            "移动云盘": {"class": CaiyunPanClient, "enabled": save_to_netdisk.get('caiyun', False) or save_to_netdisk.get('mobile', False)},
+        }
+        
+        conf = config_map.get(netdisk_type)
+
+        # 2. 判断是否需要转存
+        if not conf or not conf["enabled"]:
+            logger.info(f"无需转存操作，跳过。类型: {netdisk_type}")
+            return None
+
+        # 3. 从多账号池调度选取候选账号并构建执行序列（支持故障自动切换）
+        from src.services.account_pool_manager import AccountPoolManager
+        pool_mgr = AccountPoolManager.get_instance()
+        candidates = pool_mgr.get_candidate_accounts(netdisk_type)
+
+        if not candidates:
+            logger.warning(f"[{netdisk_type}] 网盘账号池中无可用账号（未配置、未启用或容量已满），跳过转存")
+            return None
+
+        execution_plan = []
+        primary_acc, primary_cli = pool_mgr.select_account_for_transfer(netdisk_type)
+        if primary_acc and primary_cli:
+            execution_plan.append((primary_acc, primary_cli))
+        for cand in candidates:
+            if not primary_acc or cand.get("id") != primary_acc.get("id"):
+                c_inst = pool_mgr.create_client_for_account(cand)
+                if c_inst:
+                    execution_plan.append((cand, c_inst))
+
+        if not execution_plan:
+            logger.warning(f"[{netdisk_type}] 初始化网盘账号客户端失败，跳过转存")
+            return None
+
+        # 使用 URL 互斥锁防止高并发重复转存同一资源 (防击穿)
+        lock = _get_transfer_lock(share_url)
+        with lock:
+            persisted = get_resource_by_share_link(share_url)
+            if persisted and persisted.get('is_replaced') and persisted.get('file_id'):
+                return persisted
+            # Double-check: 若无 id 的搜索发现场景，先检查内存缓存或数据库是否已被其他并发线程转存成功
+            if not has_id:
+                if share_url in _TRANSFERRED_URL_CACHE:
+                    cached = _TRANSFERRED_URL_CACHE[share_url]
+                    target_link = cached.get("share_link") or cached.get("share_url")
+                    if target_link:
+                        existing = get_resource_by_share_link(target_link)
+                        if existing and existing.get("file_id"):
+                            logger.info(f"并发防击穿: 资源已由其他线程转存完成 (命中内存缓存: {share_url})")
+                            return cached
+                    _TRANSFERRED_URL_CACHE.pop(share_url, None)
+
+                existing = get_resource_by_share_link(share_url)
+                if existing and existing.get("file_id") and existing.get("share_link"):
+                    logger.info(f"并发防击穿: 资源已由其他线程转存入库 ({share_url})")
+                    _TRANSFERRED_URL_CACHE[share_url] = existing
+                    return existing
+
+            # 3.1 前置免登录测活检查 (避免死链无效提交给网盘造成风控或报错)
+            check_res = check_link(share_url, password=share_data.get("password"), disk_type=netdisk_type)
+            if check_res.get("state") == STATE_BAD:
+                logger.warning(
+                    f"[{netdisk_type}] 转存前检测到链接已失效/违规，终止转存: {check_res.get('summary')} ({share_url})"
+                )
+                return None
+            if check_res.get("state") == STATE_LOCKED:
+                pwd = share_data.get("password") or extract_password_from_url(share_url)
+                if not pwd:
+                    logger.warning(
+                        f"[{netdisk_type}] 转存前检测到链接需要提取码但未提供密码，终止转存 ({share_url})"
+                    )
+                    return None
+
+            # 4. 执行转存（轮询/故障容灾切换可用账号）
+            from src.services.system_config_service import get_transfer_target_dir
+            target_dir_name = get_transfer_target_dir()
+
+            new_file_id, file_name, new_share_url = None, None, None
+            used_account = None
+
+            for account, client in execution_plan:
+                try:
+                    target_pdir = _resolve_target_dir(client, target_dir_name=target_dir_name)
+                    f_id, f_name, s_url = _handle_netdisk_operation(
+                        client.__class__, client, share_url, to_pdir_path=target_pdir, operation="store"
+                    )
+                    if s_url and f_id:
+                        new_file_id, file_name, new_share_url = f_id, f_name, s_url
+                        used_account = account
+                        pool_mgr.report_success(account.get("id"))
+                        break
+                except Exception as store_err:
+                    err_msg = str(store_err)
+                    logger.warning(
+                        f"[{netdisk_type}] 账号 {account.get('account_name')}(id={account.get('id')}) 转存失败: {err_msg}，尝试下一个备选账号"
+                    )
+                    is_fatal = any(
+                        kw in err_msg.lower()
+                        for kw in ("token", "cookie", "auth", "expire", "login", "401", "403", "banned")
+                    )
+                    pool_mgr.report_failure(account.get("id"), err_msg, is_fatal=is_fatal)
+
+            if not new_share_url:
+                return None
+
+            # 5. 数据库同步与缓存更新
+            account_id = used_account.get("id") if used_account else None
+            if has_id:
+                # 场景 A: 已有记录更新链接
+                if not update_share_link(share_id, new_share_url, new_file_id, account_id=account_id):
+                    return None
+                updated_record = {
+                    'id': share_id,
+                    'file_id': _normalize_file_id(new_file_id),
+                    'name': share_data.get('name') or share_data.get('title') or file_name or title,
+                    'share_link': new_share_url,
+                    'share_url': new_share_url,
+                    'cloud_name': share_data.get('cloud_name') or netdisk_type,
+                    'account_id': account_id,
+                    'is_replaced': 1,
+                }
+                _TRANSFERRED_URL_CACHE[share_url] = updated_record
+                return updated_record
+            else:
+                # 场景 B: 转存新资源，统一持久化入库到 resources (我的资源管理)
+                record_name = share_data.get('name') or share_data.get('title') or file_name or title or "未命名资源"
+                record_cloud = share_data.get('cloud_name') or netdisk_type
+                record_type = share_data.get('resource_type') or share_data.get('type') or ""
+                record_remarks = share_data.get('remark') or share_data.get('remarks') or f"转存自: {share_url}"
+
+                new_record = {
+                    'file_id': _normalize_file_id(new_file_id),
+                    'name': record_name,
+                    'share_link': new_share_url,
+                    'share_url': new_share_url,
+                    'cloud_name': record_cloud,
+                    'type': record_type,
+                    'remarks': record_remarks,
+                    'account_id': account_id,
+                    'is_replaced': 1,
+                    'health_status': 'ok',
+                    'source_link': share_url,
+                }
+                new_id = insert_resource(new_record)
+                if not new_id:
+                    return None
+                new_record['id'] = new_id
+
+                _TRANSFERRED_URL_CACHE[share_url] = new_record
+                return new_record
+
+    except Exception as e:
+        logger.exception(f"create_share 运行异常: {e}")
+        return None
+
+# --- 业务接口：删除分享 ---
+
+def del_share(share_data):
+    """
+    删除分享及其对应的网盘文件（支持按 account_id 精准路由到转存所用账号）
+    """
+    try:
+        share_url = share_data.get('share_url')
+        file_id = share_data.get('file_id')
+
+        if not share_url and not file_id:
+            return False
+
+        # 1. 获取网盘类型
+        netdisk_type = match_netdisk_link(share_url or '') if share_url else ""
+        if not netdisk_type and share_data.get("cloud_name"):
+            netdisk_type = share_data.get("cloud_name")
+
+        # 2. 优先通过 account_id 精准查找并实例化对应账号客户端
+        from src.services.account_pool_manager import AccountPoolManager
+        pool_mgr = AccountPoolManager.get_instance()
+        account_id = share_data.get("account_id")
+        client = None
+
+        if account_id:
+            client = pool_mgr.get_client_by_account_id(account_id)
+            if not client:
+                logger.warning("原转存账号不可用，拒绝改用其他账号删除")
+                return False
+
+        # 若未指定 account_id 或账号已变更，从账号池获取该网盘的首选可用账号进行删除
+        if not client and netdisk_type:
+            candidates = pool_mgr.get_candidate_accounts(netdisk_type)
+            if candidates:
+                client = pool_mgr.create_client_for_account(candidates[0])
+
+        if not client:
+            logger.warning(f"无法获取网盘账号客户端执行物理删除: {netdisk_type} ({share_url})")
+            return False
+
+        # 3. 执行物理删除
+        status = _handle_netdisk_operation(client.__class__, client, None, operation="delete", file_id=file_id)
+
+        # 3. 逻辑删除（数据库记录清理：按 share_url 与 file_id 清理 resources 表）
+        if status:
+            if not share_data.get('preserve_resource_record'):
+                if share_url:
+                    delete_by_share_link(share_url)
+                if file_id:
+                    delete_by_file_id(_normalize_file_id(file_id))
+            with _TRANSFER_LOCKS_MUTEX:
+                keys_to_del = [
+                    k for k, v in _TRANSFERRED_URL_CACHE.items()
+                    if k == share_url
+                    or (isinstance(v, dict) and (v.get("share_link") == share_url or v.get("share_url") == share_url or (file_id and v.get("file_id") == file_id)))
+                ]
+                for k in keys_to_del:
+                    _TRANSFERRED_URL_CACHE.pop(k, None)
+            logger.info(f"成功清理 {netdisk_type} 资源及其数据库记录 (URL={share_url}, file_id={file_id})")
+            return True
+        
+        return False
+
+    except Exception as e:
+        logger.exception(f"del_share 运行异常: {e}")
+        return False

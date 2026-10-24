@@ -1,0 +1,264 @@
+# src/routes/search_routes.py
+
+from flask import Blueprint, request, jsonify, Response, stream_with_context
+
+import json
+import logging
+import time
+
+from src.pan_operator import create_share, del_share
+from src.services.log_service import record_log
+from src.services.search_service import (
+    generate_search_stream_events,
+    search_public_resources,
+)
+from src.services.link_checker import (
+    check_link,
+    check_links_batch,
+    STATE_BAD,
+)
+from src.services.system_config_service import is_public_search_api_enabled
+from src.services.temp_share_service import cleanup_expired_temp_shares, resolve_view_url
+from src.utils.auth_utils import token_required
+from src.utils.netdisk_utils import FRONTEND_DISPLAY_NETDISK_OPTIONS, parse_netdisk_names
+
+logger = logging.getLogger(__name__)
+
+search_bp = Blueprint("search", __name__)
+
+
+@search_bp.route("/api/search_stream", methods=["GET"])
+def search_stream():
+    """
+    使用 Server-Sent Events (SSE) 实时流式返回搜索结果。
+    """
+    keyword = request.args.get("keyword")
+    if not keyword:
+        return jsonify({"error": "请提供搜索关键词"}), 400
+
+    logger.info(f"用户 SSE 搜索关键词: {keyword}")
+
+    def generate_events():
+        for payload in generate_search_stream_events(keyword, action="search.web"):
+            yield f"data: {payload}\n\n"
+
+    return Response(stream_with_context(generate_events()), mimetype="text/event-stream")
+
+
+@search_bp.route("/api", methods=["GET"])
+def search_api():
+    """
+    对外公开的聚合搜索接口
+    """
+    if not is_public_search_api_enabled():
+        return jsonify({"success": False, "message": "公开聚合接口当前已关闭"}), 403
+
+    keyword = request.args.get("keyword", "", type=str)
+    limit = request.args.get("limit", 100, type=int)
+    raw_clouds = request.args.getlist("cloud_name") + request.args.getlist("cloud_names")
+    target_clouds = parse_netdisk_names(raw_clouds)
+
+    invalid_clouds = [c for c in target_clouds if c not in FRONTEND_DISPLAY_NETDISK_OPTIONS]
+    if invalid_clouds:
+        invalid_str = ", ".join(invalid_clouds)
+        return jsonify({
+            "success": False,
+            "message": f"不支持的网盘类型: {invalid_str}",
+            "supported_cloud_names": FRONTEND_DISPLAY_NETDISK_OPTIONS,
+        }), 400
+
+    passed_cloud = (
+        next(iter(target_clouds))
+        if len(target_clouds) == 1
+        else (target_clouds if target_clouds else "")
+    )
+
+    success, message, results = search_public_resources(
+        keyword=keyword,
+        limit=limit,
+        cloud_name=passed_cloud,
+    )
+
+    if not success:
+        status_code = 400 if "请提供搜索关键词" in message else 500
+        return jsonify({"success": False, "message": message}), status_code
+
+    return jsonify({"success": True, "total": len(results), "results": results})
+
+
+@search_bp.route("/api/check/links", methods=["POST"])
+def check_links_api():
+    """
+    批量检测网盘分享链接有效性接口
+    """
+    data = request.get_json(silent=True) or {}
+    items = data.get("items")
+    if not items or not isinstance(items, list):
+        return jsonify({"success": False, "message": "缺少有效的 items 列表参数"}), 400
+
+    results = check_links_batch(items)
+    return jsonify({"success": True, "total": len(results), "results": results})
+
+
+@search_bp.route("/api/check/link", methods=["GET"])
+def check_single_link_api():
+    """
+    单条网盘分享链接检测接口
+    """
+    url = request.args.get("url", "").strip()
+    if not url:
+        return jsonify({"success": False, "message": "请提供待检测的网盘链接 (url)"}), 400
+
+    password = request.args.get("password")
+    disk_type = request.args.get("disk_type")
+    force_refresh = request.args.get("refresh", "false").lower() in ("true", "1")
+
+    res = check_link(url, password=password, disk_type=disk_type, force_refresh=force_refresh)
+    return jsonify({"success": True, "data": res})
+
+
+@search_bp.route("/create_share", methods=["POST"])
+@token_required
+def create_share_route():
+    start_time = time.time()
+    try:
+        share_data = request.get_json()
+        if not share_data:
+            record_log(
+                log_type="transfer",
+                action="transfer.create_share",
+                query_text="",
+                status_code=400,
+                error_message="缺少参数",
+                duration_ms=0,
+            )
+            return jsonify({"error": "缺少参数"}), 400
+        result = create_share(share_data)
+        duration_ms = int((time.time() - start_time) * 1000)
+        query_text = share_data.get("share_url") or share_data.get("title")
+        if result:
+            logger.info(f"分享创建成功: {share_data.get('title')}")
+            record_log(
+                log_type="transfer",
+                action="transfer.create_share",
+                query_text=query_text,
+                status_code=200,
+                duration_ms=duration_ms,
+                result_count=1,
+            )
+            return jsonify({"message": "分享创建成功", "success": True}), 200
+        else:
+            logger.warning(f"分享创建失败: {share_data.get('title')}")
+            record_log(
+                log_type="transfer",
+                action="transfer.create_share",
+                query_text=query_text,
+                status_code=500,
+                error_message="网盘转存/分享创建失败",
+                duration_ms=duration_ms,
+            )
+            return jsonify({"error": "分享创建失败", "success": False}), 500
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        record_log(
+            log_type="transfer",
+            action="transfer.create_share",
+            query_text=str(request.get_json(silent=True) or {}),
+            status_code=500,
+            error_message=str(e),
+            duration_ms=duration_ms,
+        )
+        logger.error(f"创建分享时发生未知错误: {str(e)}", exc_info=True)
+        return jsonify({"error": f"发生未知错误: {str(e)}"}), 500
+
+
+@search_bp.route("/del_share", methods=["POST"])
+@token_required
+def del_share_route():
+    start_time = time.time()
+    try:
+        share_data = request.get_json()
+        if not share_data:
+            return jsonify({"error": "缺少参数"}), 400
+        result = del_share(share_data)
+        duration_ms = int((time.time() - start_time) * 1000)
+        query_text = share_data.get("share_url") or ""
+        if result:
+            logger.info(f"分享删除成功: URL={share_data.get('share_url')}")
+            record_log(
+                log_type="transfer",
+                action="transfer.del_share",
+                query_text=query_text,
+                status_code=200,
+                duration_ms=duration_ms,
+            )
+            return jsonify({"message": "分享删除成功", "success": True}), 200
+        else:
+            logger.warning(f"分享删除失败: URL={share_data.get('share_url')}")
+            record_log(
+                log_type="transfer",
+                action="transfer.del_share",
+                query_text=query_text,
+                status_code=500,
+                error_message="删除转存分享失败",
+                duration_ms=duration_ms,
+            )
+            return jsonify({"error": "分享删除失败", "success": False}), 500
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        record_log(
+            log_type="transfer",
+            action="transfer.del_share",
+            query_text=str(request.get_json(silent=True) or {}),
+            status_code=500,
+            error_message=str(e),
+            duration_ms=duration_ms,
+        )
+        logger.error(f"删除分享时发生未知错误: {str(e)}", exc_info=True)
+        return jsonify({"error": f"发生未知错误: {str(e)}"}), 500
+
+
+@search_bp.route("/api/view-link", methods=["POST"])
+@token_required
+def resolve_view_link():
+    start_time = time.time()
+    data = request.get_json() or {}
+    original_url = data.get("url", "")
+    title = data.get("title", "未命名资源")
+    netdisk_name = data.get("netdisk_name", "")
+
+    if not original_url:
+        record_log(
+            log_type="transfer",
+            action="transfer.view_link",
+            query_text="",
+            status_code=400,
+            error_message="缺少链接参数",
+            duration_ms=0,
+        )
+        return jsonify({"success": False, "message": "缺少链接参数"}), 400
+
+    resolved = resolve_view_url(title=title, original_url=original_url, netdisk_name=netdisk_name)
+    duration_ms = int((time.time() - start_time) * 1000)
+    record_log(
+        log_type="transfer",
+        action="transfer.view_link",
+        query_text=f"{original_url} [{netdisk_name or 'auto'}]",
+        status_code=200 if resolved.get("mode") != "error" else 500,
+        error_message=resolved.get("message") if resolved.get("mode") == "error" else None,
+        duration_ms=duration_ms,
+    )
+    return jsonify({"success": True, **resolved})
+
+
+@search_bp.route("/api/temp-shares/cleanup", methods=["POST"])
+@token_required
+def cleanup_temp_shares():
+    cleaned_count = cleanup_expired_temp_shares()
+    record_log(
+        log_type="system",
+        action="system.temp_shares_cleanup",
+        status_code=200,
+        result_count=cleaned_count,
+    )
+    return jsonify({"success": True, "cleaned_count": cleaned_count})

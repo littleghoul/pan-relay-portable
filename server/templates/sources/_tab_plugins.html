@@ -1,0 +1,166 @@
+<!-- 插件扩展 Tab -->
+<div class="tab-pane-inner">
+    <!-- 插件列表面板 -->
+    <section class="admin-panel">
+        <div class="admin-panel-header">
+            <div class="admin-panel-title-area">
+                <h3 class="admin-panel-title">
+                    <i class="fas fa-puzzle-piece text-indigo-600"></i> Python 插件扩展源
+                </h3>
+                <p class="admin-panel-desc">动态加载 Python 采集插件，支持热重载、开关控制与在线单源联调</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button id="btnBatchTestPlugins" class="btn btn-outline-primary btn-sm" onclick="batchTestPlugins(true, this)" title="全盘检测所有 Python 插件扩展状态">
+                    <i class="fas fa-stethoscope text-[10px]"></i> 全部检测
+                </button>
+            </div>
+        </div>
+
+        <!-- 插件悬浮批量操作栏 -->
+        <div class="batch-floating-toolbar" id="pluginBatchToolbar" role="toolbar" aria-label="插件批量操作栏">
+            <div class="resource-batch-summary">
+                <i class="fas fa-check-circle text-blue-600"></i>
+                <span>已选 <strong id="pluginSelectedCount" class="text-blue-600 font-bold">0</strong> 项</span>
+                <button class="resource-batch-scope-link" id="pluginScopeToggleLink" onclick="togglePluginSelectAllMode()" type="button" style="display: none;"></button>
+                <span class="resource-batch-summary-divider"></span>
+                <button class="resource-batch-btn-clear" onclick="clearPluginSelection()" type="button" title="清空选择">
+                    <i class="fas fa-times"></i> 清空
+                </button>
+            </div>
+            <div class="resource-batch-actions">
+                <button class="btn btn-info btn-sm" onclick="batchTestPlugins(false, this)" type="button" title="联调测试选中的插件扩展">
+                    <i class="fas fa-stethoscope"></i> 测试所选
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="batchEnablePlugins(true, this)" type="button">
+                    <i class="fas fa-play"></i> 批量启用
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="batchEnablePlugins(false, this)" type="button">
+                    <i class="fas fa-ban"></i> 批量停用
+                </button>
+            </div>
+        </div>
+
+        <div class="data-table-shell">
+            <table class="table">
+                <thead class="select-none">
+                    <tr>
+                        <th style="width: 44px; text-align: center;">
+                            <input class="form-check-input" type="checkbox" id="selectPluginPageCheckbox" onchange="toggleSelectPluginPage(this)" title="选择当前页">
+                        </th>
+                        <th style="width: 50px; text-align: center; cursor: pointer;" onclick="handlePluginSort('id')" title="点击按序号排序">
+                            # <span id="pluginSortIconId" class="text-blue-600 font-bold ml-0.5">↓</span>
+                        </th>
+                        <th style="cursor: pointer;" onclick="handlePluginSort('name')" title="点击按插件名称排序">
+                            插件名称 <span id="pluginSortIconName" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="width: 95px; text-align: center; cursor: pointer;" onclick="handlePluginSort('is_enabled')" title="点击按启用状态排序">
+                            启用状态 <span id="pluginSortIconIsEnabled" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="width: 90px; text-align: center; cursor: pointer;" onclick="handlePluginSort('health_status')" title="点击按健康状态排序">
+                            健康状态 <span id="pluginSortIconHealthStatus" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="width: 90px; text-align: center; cursor: pointer;" onclick="handlePluginSort('latency_ms')" title="点击按耗时排序">
+                            耗时 <span id="pluginSortIconLatencyMs" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="width: 170px; text-align: center; cursor: pointer;" onclick="handlePluginSort('checked_at')" title="点击按最近检测时间排序">
+                            最近检测 <span id="pluginSortIconCheckedAt" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="cursor: pointer;" onclick="handlePluginSort('description')" title="点击按描述排序">
+                            描述 <span id="pluginSortIconDescription" class="text-slate-300 ml-0.5">↕</span>
+                        </th>
+                        <th style="width: 145px; text-align: center;">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="pluginTableBody">
+                    <tr>
+                        <td colspan="8" class="text-slate-400 text-center py-8 text-xs">
+                            <i class="fas fa-spinner fa-spin mr-2"></i> 正在加载插件数据...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 分页栏 (全站统一 Slate 规范) -->
+        <div class="px-5 py-4 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-sans text-slate-500">
+            <div class="flex items-center gap-2 text-xs text-slate-500">
+                <span>每页显示</span>
+                <select id="pluginPageSizeSelect" onchange="handlePluginPageSizeChange(this.value)"
+                    class="px-2 py-1 text-xs rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="15" selected>15 条</option>
+                    <option value="30">30 条</option>
+                    <option value="50">50 条</option>
+                    <option value="100">100 条</option>
+                </select>
+                <span class="text-slate-400">第 <span id="pluginCurrentPageNum">1</span> / <span id="pluginTotalPageNum">1</span> 页（共 <span id="pluginTotalCountNum">0</span> 条）</span>
+            </div>
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="flex items-center space-x-1.5" id="pluginPaginationControls"></div>
+                <div class="flex items-center gap-1.5 text-xs text-slate-500 border-l border-slate-200 pl-3">
+                    <span>跳至</span>
+                    <input type="number" id="pluginJumpPageInput" min="1" value="1"
+                        class="w-14 px-2 py-1 text-xs text-center rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-blue-500"
+                        onkeydown="if(event.key==='Enter'){handlePluginJumpPage();}">
+                    <span>页</span>
+                    <button type="button" onclick="handlePluginJumpPage()"
+                        class="px-2.5 py-1 text-xs rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition cursor-pointer">跳转</button>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- 测试插件模态框 -->
+<div class="modal fade" id="testPluginModal" tabindex="-1" aria-labelledby="testPluginModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="testPluginModalLabel">
+                    <i class="fas fa-vial text-blue-600"></i>
+                    <span>测试插件检索能力</span>
+                </h5>
+                <button type="button" class="btn-close" data-ui-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body space-y-4">
+                <input type="hidden" id="currentTestPluginName">
+                <div class="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs">
+                    <div>
+                        <span class="text-slate-400">测试插件：</span>
+                        <strong id="modalPluginDisplayName" class="text-slate-800 mr-2">--</strong>
+                        <span class="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 font-mono text-[11px] border border-blue-100" id="modalPluginName">--</span>
+                    </div>
+                    <div class="text-slate-500 text-xs">
+                        单次超时限制: <span id="modalPluginTimeout" class="font-bold text-slate-700">--</span>s
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="text" class="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all text-xs font-medium text-slate-800" id="pluginTestKeyword" placeholder="无结果时自动轮询：仙逆、逆袭、总裁" value="仙逆">
+                    <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer flex-shrink-0" type="button" id="startPluginTestBtn" onclick="runPluginTest()">
+                        <i class="fas fa-play text-[10px]"></i> 开始检索
+                    </button>
+                </div>
+
+                <div id="pluginTestResultArea" class="d-none space-y-3">
+                    <div class="p-3 bg-blue-50 border border-blue-200/60 rounded-xl text-xs text-blue-800 font-medium" id="pluginTestStatusAlert"></div>
+                    <div class="border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs" style="max-height: 320px; overflow-y: auto;">
+                        <table class="table mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 45px; text-align: center;">#</th>
+                                    <th>标题</th>
+                                    <th style="width: 100px;">网盘平台</th>
+                                    <th>链接 / 提取码</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pluginTestTableBody" class="divide-y divide-slate-100 text-xs"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer" data-ui-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>

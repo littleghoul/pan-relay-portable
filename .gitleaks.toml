@@ -1,0 +1,11 @@
+title = "Pan Relay Portable"
+[extend]
+useDefault = true
+
+# Literal placeholder values in upstream curl documentation, not credentials.
+[[rules]]
+id = "curl-auth-header"
+[[rules.allowlists]]
+description = "Documentation placeholders only"
+regexTarget = "secret"
+regexes = ['''^YOUR_API_KEY$''', '''^YOUR_TRANSFER_API_KEY$''']

@@ -1,0 +1,7 @@
+*
+!server/
+!server/**
+server/**/__pycache__
+server/**/*.pyc
+server/data/
+server/logs/

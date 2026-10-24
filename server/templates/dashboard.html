@@ -1,0 +1,1613 @@
+{% extends "admin_layout.html" %}
+
+{% block title %}仪表盘 - Pan-Relay Console{% endblock %}
+
+{% block head %}
+<style>
+    /* SVG Charts & Tooltips */
+    .chart-container {
+        position: relative;
+        width: 100%;
+    }
+
+    .chart-guide-line {
+        pointer-events: none;
+    }
+
+    .chart-hover-dot {
+        pointer-events: none;
+    }
+
+    .chart-tooltip {
+        position: absolute;
+        pointer-events: none;
+        z-index: 30;
+        display: none;
+        opacity: 0;
+        background: rgba(255, 255, 255, 0.96);
+        color: #0f172a;
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        line-height: 1.5;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.05);
+        backdrop-filter: blur(8px);
+        white-space: nowrap;
+        transition: left 0.06s ease, opacity 0.12s ease, transform 0.12s ease;
+        transform: translateY(4px);
+    }
+
+    .chart-tooltip.active {
+        display: block;
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .chart-tooltip .tt-title {
+        font-weight: 700;
+        margin-bottom: 5px;
+        color: #475569;
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 4px;
+        font-size: 11.5px;
+    }
+
+    .chart-tooltip .tt-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 3px;
+        color: #475569;
+        font-size: 12px;
+    }
+
+    .chart-tooltip .tt-row strong {
+        color: #0f172a;
+        font-weight: 600;
+    }
+
+    .chart-tooltip .tt-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+    }
+
+    .pie-slice {
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease;
+        cursor: pointer;
+        transform-origin: 100px 100px;
+    }
+
+    .pie-slice:hover,
+    .pie-slice.active {
+        transform: scale(1.04);
+        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+    }
+
+    .pie-pill-item {
+        transition: all 0.15s ease;
+    }
+
+    .pie-pill-item:hover,
+    .pie-pill-item.active {
+        background-color: #f1f5f9;
+        color: #0f172a !important;
+        font-weight: 600;
+    }
+
+    .pie-pill-item.active span:first-child {
+        transform: scale(1.25);
+        box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6 animate-fade-in">
+    <!-- =========================================================================
+         顶栏：欢迎与全局快捷操作
+         ========================================================================= -->
+    <div
+        class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white px-6 py-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+        <div class="flex items-center space-x-3.5">
+            <div
+                class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg shadow-2xs">
+                <i class="fas fa-gauge-high text-base"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-slate-900 tracking-tight">系统仪表盘</h1>
+                <p class="text-xs text-slate-400 mt-0.5">全网聚合检索、网盘自动转存、私有收益沉淀与服务集群总览</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+            <!-- Web 前台服务状态 -->
+            <a href="{{ url_for('system_config.frontend_config_page') }}" id="dash-header-web-badge"
+                class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 shadow-2xs transition-colors group {{ 'text-slate-700 hover:text-slate-900' if summary.system.enable_frontend else 'text-slate-400 hover:text-slate-600' }}"
+                title="Web 前台服务 (点击前往配置 · {{ '已启用' if summary.system.enable_frontend else '已关闭' }})">
+                <span
+                    class="w-2 h-2 rounded-full mr-2 {{ 'bg-emerald-500 ring-2 ring-emerald-100' if summary.system.enable_frontend else 'bg-slate-300' }}"></span>
+                <span>Web前台</span>
+            </a>
+
+            <!-- 开放 API 接口状态 -->
+            <a href="{{ url_for('system_config.api_config_page') }}" id="dash-header-api-badge"
+                class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 shadow-2xs transition-colors group {{ 'text-slate-700 hover:text-slate-900' if summary.system.public_search_api_enabled else 'text-slate-400 hover:text-slate-600' }}"
+                title="开放 API 服务 (点击前往配置 · {{ '已启用' if summary.system.public_search_api_enabled else '已关闭' }})">
+                <span
+                    class="w-2 h-2 rounded-full mr-2 {{ 'bg-emerald-500 ring-2 ring-emerald-100' if summary.system.public_search_api_enabled else 'bg-slate-300' }}"></span>
+                <span>公开API</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         第一层级：4 大核心量化 KPI 卡片 (Hero KPI Cards - 统一 3 行网格与状态语义)
+         ========================================================================= -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- KPI 1: 私有资源储备 (Primary Asset) -->
+        <div
+            class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 tracking-wider">私有资源储备</span>
+                    <div class="w-8 h-8 rounded-xl bg-blue-50/80 text-blue-600 flex items-center justify-center">
+                        <i class="fas fa-layer-group text-xs"></i>
+                    </div>
+                </div>
+                <div class="mt-3 flex items-baseline justify-between">
+                    <span class="text-3xl font-extrabold text-slate-900 tracking-tight font-mono"
+                        id="stat-resources-total">{{ summary.resources.total_count }}</span>
+                    <span
+                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-100/70">
+                        已换链 <strong class="ml-1 font-mono font-bold" id="stat-resources-replaced">{{
+                            summary.resources.replaced_count }}</strong>
+                    </span>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100">
+                <span>云盘覆盖: <strong class="text-slate-700 font-medium font-mono" id="stat-resources-clouds">{{
+                        summary.resources.cloud_distribution|length }}</strong> 种</span>
+                <a href="{{ url_for('resources.resources_page') }}"
+                    class="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center group">
+                    <span>资源管理</span>
+                    <i
+                        class="fas fa-chevron-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-blue-400"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- KPI 2: 今日搜索活跃 (Primary Traffic) -->
+        <div
+            class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 tracking-wider">今日搜索活跃</span>
+                    <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                        <i class="fas fa-bolt text-xs"></i>
+                    </div>
+                </div>
+                <div class="mt-3 flex items-baseline justify-between">
+                    <span class="text-3xl font-extrabold text-slate-900 tracking-tight font-mono"
+                        id="stat-today-search">{{ summary.logs.today_search }}</span>
+                    <span
+                        class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/60"
+                        id="stat-today-duration-badge">
+                        <span class="w-1.5 h-1.5 rounded-full mr-1.5 bg-blue-500"></span>
+                        均耗 <strong class="ml-1 font-mono font-bold" id="stat-today-avg-dur">{{
+                            summary.logs.today_avg_duration_ms }}</strong> ms
+                    </span>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100">
+                <span class="truncate max-w-[170px]" id="stat-search-channels">Web {{
+                    summary.search_analytics.today_web_searches }} · API {{
+                    summary.search_analytics.today_api_searches }}</span>
+                <a href="{{ url_for('logs.logs_page', log_type='search') }}"
+                    class="text-xs font-medium text-slate-600 hover:text-blue-600 flex items-center group flex-shrink-0">
+                    <span>运行日志</span>
+                    <i
+                        class="fas fa-chevron-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-slate-400"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- KPI 3: 搜索供给命中率 (Primary Supply Quality) -->
+        <div
+            class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 tracking-wider">搜索供给命中率</span>
+                    <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                        <i class="fas fa-bullseye text-xs"></i>
+                    </div>
+                </div>
+                <div class="mt-3 flex items-baseline justify-between">
+                    <span class="text-3xl font-extrabold text-slate-900 tracking-tight font-mono" id="stat-hit-rate">{{
+                        summary.search_analytics.today_hit_rate }}%</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium
+                        {% if summary.search_analytics.today_zero_searches > 0 %}bg-rose-50 text-rose-700 border border-rose-100/80
+                        {% else %}bg-emerald-50 text-emerald-700 border border-emerald-100/80{% endif %}"
+                        id="stat-hit-badge">
+                        <span
+                            class="w-1.5 h-1.5 rounded-full mr-1.5 {% if summary.search_analytics.today_zero_searches > 0 %}bg-rose-500{% else %}bg-emerald-500{% endif %}"></span>
+                        {% if summary.search_analytics.today_zero_searches > 0 %}搜空 {{
+                        summary.search_analytics.today_zero_searches }} 次
+                        {% else %}供给充足{% endif %}
+                    </span>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100">
+                <span class="truncate max-w-[160px]">有产搜索: <strong class="text-slate-700 font-medium font-mono"
+                        id="stat-hit-count">{{ summary.search_analytics.today_hit_searches }}</strong> 次</span>
+                <a href="javascript:void(0)"
+                    onclick="switchKeywordTab('zero'); document.getElementById('dashKeywordsCard')?.scrollIntoView({behavior: 'smooth'})"
+                    class="text-xs font-medium text-amber-700 hover:text-amber-800 flex items-center group flex-shrink-0">
+                    <span>补库指南</span>
+                    <i
+                        class="fas fa-chevron-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-amber-500"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- KPI 4: 今日转存转化 (Primary Conversion & Income) -->
+        <div
+            class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 tracking-wider">今日转存转化</span>
+                    <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                        <i class="fas fa-rocket text-xs"></i>
+                    </div>
+                </div>
+                <div class="mt-3 flex items-baseline justify-between">
+                    <span class="text-3xl font-extrabold text-slate-900 tracking-tight font-mono"
+                        id="stat-transfer-total">{{ summary.logs.today_transfer }}</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium
+                        {% if summary.logs.today_transfer > 0 %}bg-emerald-50 text-emerald-700 border border-emerald-100/80
+                        {% else %}bg-slate-100 text-slate-500 border border-slate-200/60{% endif %}"
+                        id="stat-transfer-badge">
+                        <span
+                            class="w-1.5 h-1.5 rounded-full mr-1.5 {% if summary.logs.today_transfer > 0 %}bg-emerald-500{% else %}bg-slate-400{% endif %}"></span>
+                        {% if summary.logs.today_transfer > 0 %}{{ summary.logs.today_transfer_success_rate }}% 成功{%
+                        else %}专属换链{% endif %}
+                    </span>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100">
+                <span class="truncate max-w-[170px]">转存成功: <strong class="text-slate-700 font-medium font-mono"
+                        id="stat-transfer-success-count">{{ summary.logs.today_transfer_success }}</strong> 次</span>
+                <a href="{{ url_for('logs.logs_page', log_type='transfer') }}"
+                    class="text-xs font-medium text-slate-600 hover:text-blue-600 flex items-center group flex-shrink-0">
+                    <span>转存日志</span>
+                    <i
+                        class="fas fa-chevron-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-slate-400"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         第二层级：动态周期筛选栏 (7天 / 30天 / 90天 / 180天 / 全周期)
+         ========================================================================= -->
+    <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="inline-flex rounded-xl bg-slate-200/70 p-1 border border-slate-200 text-xs font-semibold">
+            <a href="{{ url_for('dashboard.dashboard_page', days=7) }}"
+                class="px-3 py-1.5 rounded-lg transition {{ 'bg-white text-slate-900 shadow-2xs font-bold' if current_days == 7 else 'text-slate-600 hover:text-slate-900' }}">近
+                7 天</a>
+            <a href="{{ url_for('dashboard.dashboard_page', days=30) }}"
+                class="px-3 py-1.5 rounded-lg transition {{ 'bg-white text-slate-900 shadow-2xs font-bold' if current_days == 30 else 'text-slate-600 hover:text-slate-900' }}">近
+                30 天</a>
+            <a href="{{ url_for('dashboard.dashboard_page', days=90) }}"
+                class="px-3 py-1.5 rounded-lg transition {{ 'bg-white text-slate-900 shadow-2xs font-bold' if current_days == 90 else 'text-slate-600 hover:text-slate-900' }}">近
+                90 天</a>
+            <a href="{{ url_for('dashboard.dashboard_page', days=180) }}"
+                class="px-3 py-1.5 rounded-lg transition {{ 'bg-white text-slate-900 shadow-2xs font-bold' if current_days == 180 else 'text-slate-600 hover:text-slate-900' }}">近
+                180 天</a>
+            <a href="{{ url_for('dashboard.dashboard_page', days=0) }}"
+                class="px-3 py-1.5 rounded-lg transition {{ 'bg-white text-slate-900 shadow-2xs font-bold' if current_days == 0 else 'text-slate-600 hover:text-slate-900' }}">全周期</a>
+        </div>
+        <div class="text-xs text-slate-400">
+            <span>当前统计范围: <strong class="text-slate-700 font-semibold font-mono">{% if current_days == 0 %}全部历史全周期{%
+                    else %}近 {{ current_days }} 天{% endif %}</strong></span>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         第三层级：API 与 Web 搜索趋势折线图卡片 (平滑贝塞尔曲线 + 悬浮交互 Tooltip)
+         ========================================================================= -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs">
+        <div class="flex items-center justify-between flex-wrap gap-4 mb-6">
+            <div>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">API 与 Web 搜索趋势</h2>
+                <p class="text-xs text-slate-500 mt-0.5">
+                    {% if current_days == 0 %}全部历史每日 API 接口与 Web 前台实际搜索及命中趋势{% else %}近 {{ current_days }} 天每日 API 接口与
+                    Web 前台实际搜索及命中趋势{% endif %}
+                </p>
+            </div>
+            <div class="flex items-center gap-4 text-xs font-semibold text-slate-600">
+                <span class="flex items-center gap-1.5"><span
+                        class="w-2.5 h-2.5 rounded-full bg-[#4f46e5]"></span>总搜索量</span>
+                <span class="flex items-center gap-1.5"><span
+                        class="w-2.5 h-2.5 rounded-full bg-[#10b981]"></span>有效命中量</span>
+            </div>
+        </div>
+
+        <div class="chart-container relative overflow-x-auto">
+            <div class="chart-tooltip pointer-events-none"></div>
+            <svg viewBox="0 0 720 230" class="w-full min-w-[550px] h-auto block font-sans">
+                <defs>
+                    <linearGradient id="callsGradDash" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.18" />
+                        <stop offset="100%" stop-color="#4f46e5" stop-opacity="0.0" />
+                    </linearGradient>
+                    <linearGradient id="succGradDash" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#10b981" stop-opacity="0.18" />
+                        <stop offset="100%" stop-color="#10b981" stop-opacity="0.0" />
+                    </linearGradient>
+                </defs>
+
+                <!-- Y 轴网格辅助线与刻度 -->
+                {% for tick in chart_data.get('y_ticks', []) %}
+                <line x1="45" y1="{{ tick['y'] }}" x2="675" y2="{{ tick['y'] }}" stroke="#f1f5f9" stroke-width="0.8"
+                    stroke-dasharray="3 3" />
+                <text x="38" y="{{ tick['y'] + 3.5 }}" text-anchor="end" font-size="9.5" fill="#94a3b8">{{ tick['val']
+                    }}</text>
+                {% endfor %}
+
+                <!-- X 轴基线 -->
+                <line x1="45" y1="180" x2="675" y2="180" stroke="#e2e8f0" stroke-width="0.9" />
+
+                <!-- 鼠标悬浮对齐线 -->
+                <line class="chart-guide-line" x1="0" y1="20" x2="0" y2="180" stroke="#818cf8" stroke-width="1"
+                    stroke-dasharray="3 3" style="display:none;pointer-events:none" />
+
+                <!-- 平滑渐变填充面 -->
+                {% if chart_data.get('calls_area_path') %}
+                <path d="{{ chart_data['calls_area_path'] }}" fill="url(#callsGradDash)" />
+                {% endif %}
+                {% if chart_data.get('successes_area_path') %}
+                <path d="{{ chart_data['successes_area_path'] }}" fill="url(#succGradDash)" />
+                {% endif %}
+
+                <!-- 趋势平滑贝塞尔曲线 -->
+                {% if chart_data.get('calls_path') %}
+                <path d="{{ chart_data['calls_path'] }}" fill="none" stroke="#4f46e5" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round" />
+                {% endif %}
+                {% if chart_data.get('successes_path') %}
+                <path d="{{ chart_data['successes_path'] }}" fill="none" stroke="#10b981" stroke-width="1.3"
+                    stroke-linecap="round" stroke-linejoin="round" />
+                {% endif %}
+
+                <!-- 动态悬停聚焦圆点 -->
+                <circle class="chart-hover-dot calls-dot" cx="0" cy="0" r="3.5" fill="#4f46e5" stroke="#ffffff"
+                    stroke-width="1.8" style="display:none;pointer-events:none" />
+                <circle class="chart-hover-dot succ-dot" cx="0" cy="0" r="3" fill="#10b981" stroke="#ffffff"
+                    stroke-width="1.6" style="display:none;pointer-events:none" />
+
+                <!-- X 轴刻度与交互节点 -->
+                {% for item in chart_data.get('trend', []) %}
+                {% if item.get('show_label') %}
+                <text x="{{ item['x'] }}" y="198" text-anchor="middle" font-size="9.5" font-weight="450"
+                    fill="#94a3b8">{{ item['short_date'] }}</text>
+                {% endif %}
+
+                <!-- 透明列触控矩形 -->
+                <rect class="chart-col-trigger" x="{{ item['x'] - 20 }}" y="15" width="40" height="170"
+                    fill="transparent" style="cursor:pointer" data-date="{{ item['date'] }}"
+                    data-calls="{{ item['calls'] }}" data-successes="{{ item['successes'] }}"
+                    data-failures="{{ item['failures'] }}" data-cx="{{ item['x'] }}"
+                    data-cy-calls="{{ item['y_calls'] }}" data-cy-succ="{{ item['y_successes'] }}" />
+                {% endfor %}
+            </svg>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         第四层级：搜索渠道与偏好分布（左） + 零结果搜索词 Top 10 (站长补库指南)（右）
+         ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        <!-- 左侧：搜索来源渠道分布 (Donut Pie Chart) -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between mb-5">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 tracking-tight">搜索来源渠道分布</h2>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            {% if current_days == 0 %}全部历史 Web 前台与 API 开放接口调用构成占比{% else %}近 {{ current_days }} 天 Web
+                            前台与 API 开放接口调用构成占比{% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                {% if not pie_data or pie_data.get('total_calls', 0) == 0 %}
+                <div class="text-center py-12 text-slate-400 text-xs">
+                    <svg class="w-10 h-10 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 8v4l3 3" />
+                    </svg>
+                    <div>当前时间范围内暂无搜索记录</div>
+                </div>
+                {% else %}
+                <div class="pie-wrapper" id="dash-platform-dist">
+                    <div class="pie-svg-box relative w-56 h-56 mx-auto">
+                        <svg viewBox="0 0 200 200" class="w-full h-full">
+                            {% for item in pie_data.get('items', []) %}
+                            <path d="{{ item['path_d'] }}" fill="{{ item['color'] }}"
+                                class="pie-slice transition-opacity hover:opacity-80 cursor-pointer"
+                                data-platform="{{ item['platform'] }}" data-calls="{{ item['calls_formatted'] }}"
+                                data-percent="{{ item['percentage'] }}%"
+                                data-successes="{{ item['successes_formatted'] }}"
+                                data-failures="{{ item['failures_formatted'] }}" data-rate="{{ item['success_rate'] }}%"
+                                data-color="{{ item['color'] }}">
+                            </path>
+                            {% endfor %}
+                        </svg>
+                        <div
+                            class="pie-center-text absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center select-none px-2">
+                            <div class="pie-center-lbl text-xs text-slate-500 font-medium truncate max-w-[140px] transition-colors duration-150"
+                                id="dash-pie-lbl">总搜索量</div>
+                            <div class="pie-center-val text-xl font-bold text-slate-900 mt-0.5 tracking-tight transition-all duration-150"
+                                id="dash-pie-val">{{ pie_data.get('total_calls_formatted', '0') }} 次</div>
+                            <div class="pie-center-sub text-[11px] text-slate-400 mt-0.5 min-h-[16px] font-medium transition-colors duration-150"
+                                id="dash-pie-sub"></div>
+                        </div>
+                    </div>
+
+                    <!-- 紧凑点状图例 -->
+                    <div
+                        class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 mt-5 pt-3 border-t border-slate-100">
+                        {% for item in pie_data.get('items', []) %}
+                        <div class="pie-pill-item inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 cursor-pointer transition text-xs font-medium text-slate-600 hover:text-slate-900 select-none"
+                            data-platform="{{ item['platform'] }}" data-calls="{{ item['calls_formatted'] }}"
+                            data-percent="{{ item['percentage'] }}%" data-successes="{{ item['successes_formatted'] }}"
+                            data-failures="{{ item['failures_formatted'] }}" data-rate="{{ item['success_rate'] }}%"
+                            data-color="{{ item['color'] }}">
+                            <span class="w-2 h-2 rounded-full shrink-0" style="background:{{ item['color'] }}"></span>
+                            <span class="truncate">{{ item['platform'] }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 右侧：热门搜索词 / 搜空待补库 Top 10 (双 Tab 切换) -->
+        <div id="dashKeywordsCard"
+            class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs flex flex-col justify-between">
+            <div>
+                <!-- 卡片头部与 Tab 切换 -->
+                <div
+                    class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-100 gap-2">
+                    <div class="flex items-center space-x-2.5">
+                        <div id="tabKeywordIcon"
+                            class="w-7 h-7 rounded-lg bg-indigo-50/80 flex items-center justify-center text-indigo-600 transition-colors shrink-0">
+                            <i class="fas fa-fire text-xs"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h2 id="tabKeywordTitle" class="text-sm font-bold text-slate-900 tracking-tight">热门搜索词
+                                    Top 10</h2>
+                                <span id="tabKeywordBadge"
+                                    class="text-[10px] font-medium px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/60">真实检索</span>
+                            </div>
+                            <p id="tabKeywordSubtitle" class="text-[11px] text-slate-500 mt-0.5">
+                                {% if current_days == 0 %}全部历史全站高频搜索关键词榜单与热度排行{% else %}近 {{ current_days }}
+                                天全站真实高频搜索关键词榜单与热度排行{% endif %}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Tab 切换按钮组 -->
+                    <div class="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                        <div
+                            class="inline-flex p-0.5 rounded-lg bg-slate-100 border border-slate-200/60 text-xs font-medium">
+                            <button type="button" id="tabBtnHotKeywords" onclick="switchKeywordTab('hot')"
+                                class="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-white text-indigo-600 shadow-2xs transition">
+                                热门搜索
+                            </button>
+                            <button type="button" id="tabBtnZeroKeywords" onclick="switchKeywordTab('zero')"
+                                class="px-2.5 py-0.5 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition">
+                                搜空补库
+                            </button>
+                        </div>
+                        <button type="button" id="btnQuickAddInCard" onclick="openQuickAddModal()"
+                            style="display: none;"
+                            class="px-2 py-0.5 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 shadow-2xs transition flex items-center gap-1 shrink-0"
+                            title="录入新资源">
+                            <i class="fas fa-plus text-[9px]"></i>
+                            <span>录入</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab 1: 真实热门搜索词 Top 10 (默认展示) -->
+                <div id="tabHotKeywordsContent">
+                    {% if not top_hot_keywords %}
+                    <div class="text-center py-10 text-slate-400 text-xs">
+                        <i class="fas fa-magnifying-glass text-2xl text-slate-300 mb-2 block"></i>
+                        <div>当前周期内暂无搜索词记录</div>
+                    </div>
+                    {% else %}
+                    <div class="space-y-1" id="dashTopHotKeywordsProgressList">
+                        {% for item in top_hot_keywords %}
+                        <div
+                            class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-50/80 transition-colors text-xs">
+                            <span class="flex items-center gap-2 font-semibold text-slate-800 truncate min-w-0 pr-2">
+                                <span
+                                    class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0 {{ 'bg-amber-100 text-amber-800' if loop.index == 1 else ('bg-slate-200 text-slate-700' if loop.index <= 3 else 'bg-slate-100 text-slate-500') }}">
+                                    {{ loop.index }}
+                                </span>
+                                <a href="/?keyword={{ item.keyword | urlencode }}" target="_blank"
+                                    class="truncate hover:text-indigo-600 transition-colors"
+                                    title="前台检索：{{ item.keyword }}">
+                                    {{ item.keyword }}
+                                </a>
+                            </span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span class="font-bold text-slate-700 font-mono text-[11px]">{{ item.count }} 次</span>
+                                {% if item.avg_results > 0 %}
+                                <span
+                                    class="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 font-medium">均产
+                                    {{ item.avg_results }}</span>
+                                {% else %}
+                                <span
+                                    class="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-100 font-medium">无产出</span>
+                                {% endif %}
+                                <a href="/?keyword={{ item.keyword | urlencode }}" target="_blank"
+                                    class="w-4.5 h-4.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 flex items-center justify-center transition"
+                                    title="前台验证搜索">
+                                    <i class="fas fa-external-link-alt text-[8px]"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Tab 2: 零结果搜索词 Top 10 (站长补库指南) -->
+                <div id="tabZeroKeywordsContent" style="display: none;">
+                    {% if not top_zero_keywords %}
+                    <div class="text-center py-10 text-slate-400 text-xs">
+                        <i class="fas fa-circle-check text-2xl text-emerald-500 mb-2 block"></i>
+                        <div>无搜空词，资源供给充沛！</div>
+                    </div>
+                    {% else %}
+                    <div class="space-y-1" id="dashTopZeroKeywordsProgressList">
+                        {% for item in top_zero_keywords %}
+                        <div
+                            class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-50/80 transition-colors text-xs">
+                            <span class="flex items-center gap-2 font-semibold text-slate-800 truncate min-w-0 pr-2">
+                                <span
+                                    class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0 {{ 'bg-amber-100 text-amber-800' if loop.index == 1 else ('bg-slate-200 text-slate-700' if loop.index <= 3 else 'bg-slate-100 text-slate-500') }}">
+                                    {{ loop.index }}
+                                </span>
+                                <span class="truncate hover:text-amber-700 transition-colors cursor-pointer"
+                                    title="{{ item.keyword }}"
+                                    onclick="openQuickAddModal('{{ item.keyword | escape }}')">{{ item.keyword }}</span>
+                            </span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span class="font-bold text-amber-700 font-mono text-[11px]">{{ item.count }} 次</span>
+                                <button type="button" onclick="openQuickAddModal('{{ item.keyword | escape }}')"
+                                    class="px-1.5 py-0.2 rounded bg-white hover:bg-amber-50 text-amber-800 font-medium text-[10px] transition border border-amber-200 shadow-2xs flex items-center gap-0.5"
+                                    title="一键录入该资源到私有库">
+                                    <i class="fas fa-plus text-[7px] text-amber-600"></i> 补库
+                                </button>
+                                <a href="/?keyword={{ item.keyword | urlencode }}" target="_blank"
+                                    class="w-4.5 h-4.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 flex items-center justify-center transition"
+                                    title="前台验证搜索">
+                                    <i class="fas fa-external-link-alt text-[8px]"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         第三层级：基础设施与引擎集群矩阵 (3 大平衡模块 - 4 cols + 5 cols + 3 cols)
+         ========================================================================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+
+        <!-- 模块 1: 最新收录私有库 (4 cols - 单独一块) -->
+        <div
+            class="lg:col-span-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+            <div>
+                <div class="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-blue-50/80 flex items-center justify-center text-blue-600">
+                            <i class="fas fa-layer-group text-xs"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-sm font-bold text-slate-900 tracking-tight">最新收录私有库</h2>
+                            <p class="text-[11px] text-slate-400">最新收录的私有库资源</p>
+                        </div>
+                    </div>
+                    <a href="{{ url_for('resources.resources_page') }}"
+                        class="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center group">
+                        <span>资源管理</span>
+                        <i
+                            class="fas fa-arrow-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-blue-400"></i>
+                    </a>
+                </div>
+
+                <!-- 最新入库资源条目 -->
+                <div class="mt-3.5">
+                    <div class="text-[11px] font-semibold text-slate-500 mb-2 flex items-center justify-between">
+                        <span>最新入库资源</span>
+                        <span class="text-slate-400 font-mono text-[10px]">共 {{ summary.resources.total_count }}
+                            条</span>
+                    </div>
+                    <div class="divide-y divide-slate-100">
+                        {% if summary.resources.recent_items %}
+                        {% for res in summary.resources.recent_items[:5] %}
+                        <div
+                            class="py-1.5 group flex items-center justify-between gap-2 hover:bg-slate-50/70 -mx-1 px-1 rounded-lg transition-colors">
+                            <div class="min-w-0 flex-1">
+                                <div class="font-medium text-xs text-slate-800 truncate" title="{{ res.name }}">
+                                    {{ res.name }}
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1.5 text-[10px] text-slate-400 flex-shrink-0">
+                                <span
+                                    class="inline-flex items-center px-1.5 py-0.2 rounded font-medium bg-slate-100 text-slate-600">
+                                    {{ res.cloud_name or '通用' }}
+                                </span>
+                                <a href="{{ res.share_link }}" target="_blank"
+                                    class="text-slate-400 hover:text-blue-600 p-0.5 transition-colors" title="打开原始链接">
+                                    <i class="fas fa-external-link-alt text-[9px]"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="py-3 text-center text-xs text-slate-400">暂无入库资源</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模块 2: 搜索通道与网盘转存 (5 cols - 合并/Tab 切换模块) -->
+        <div
+            class="lg:col-span-5 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+            <div>
+                <div class="flex items-center justify-between pb-3.5 border-b border-slate-100 gap-2">
+                    <div class="flex items-center space-x-2.5">
+                        <div id="tabEngineIcon"
+                            class="w-8 h-8 rounded-xl bg-blue-50/80 flex items-center justify-center text-blue-600 transition-colors">
+                            <i class="fas fa-network-wired text-xs"></i>
+                        </div>
+                        <div>
+                            <h2 id="tabEngineTitle" class="text-sm font-bold text-slate-900 tracking-tight">搜索源通道集群</h2>
+                            <p id="tabEngineSubtitle" class="text-[11px] text-slate-400">API、插件与 Telegram 抓取网络</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <div
+                            class="inline-flex p-0.5 rounded-lg bg-slate-100 border border-slate-200/60 text-xs font-medium shrink-0">
+                            <button type="button" id="tabBtnEngineChannels" onclick="switchEngineTab('channels')"
+                                class="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-white text-blue-600 shadow-2xs transition">
+                                搜索通道
+                            </button>
+                            <button type="button" id="tabBtnEngineCredentials" onclick="switchEngineTab('credentials')"
+                                class="px-2.5 py-0.5 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition">
+                                网盘账号池
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 1: 搜索源通道集群 -->
+                <div id="tabEngineChannelsContent" class="mt-4 space-y-2.5">
+                    <!-- API 接口源 -->
+                    <div
+                        class="p-3 rounded-xl bg-slate-50/70 border border-slate-200/60 flex items-center justify-between">
+                        <div class="flex items-center space-x-2.5 min-w-0">
+                            <div
+                                class="w-7 h-7 rounded-lg bg-blue-50/80 text-blue-600 flex items-center justify-center text-xs flex-shrink-0">
+                                <i class="fas fa-code"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-slate-800">API 接口源</div>
+                                <div class="text-[10px] text-slate-400 font-mono">响应 {{
+                                    summary.sources.api.avg_response_time_ms }} ms</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs font-bold text-slate-900 font-mono" id="source-stat-api">
+                                {{ summary.sources.api.enabled_count }} <span
+                                    class="text-[10px] font-normal text-slate-400">/ {{ summary.sources.api.total_count
+                                    }} 启用</span>
+                            </div>
+                            <div class="text-[10px] text-emerald-600 font-medium">{{ summary.sources.api.healthy_count
+                                }} 组健康</div>
+                        </div>
+                    </div>
+
+                    <!-- Python 扩展插件 -->
+                    <div
+                        class="p-3 rounded-xl bg-slate-50/70 border border-slate-200/60 flex items-center justify-between">
+                        <div class="flex items-center space-x-2.5 min-w-0">
+                            <div
+                                class="w-7 h-7 rounded-lg bg-blue-50/80 text-blue-600 flex items-center justify-center text-xs flex-shrink-0">
+                                <i class="fas fa-puzzle-piece"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-slate-800">Python 插件</div>
+                                <div class="text-[10px] text-slate-400">沙箱抓取与解析</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs font-bold text-slate-900 font-mono" id="source-stat-plugins">
+                                {{ summary.sources.plugins.enabled_count }} <span
+                                    class="text-[10px] font-normal text-slate-400">/ {{
+                                    summary.sources.plugins.total_count }} 开启</span>
+                            </div>
+                            <div class="text-[10px] text-emerald-600 font-medium">正常运行</div>
+                        </div>
+                    </div>
+
+                    <!-- Telegram 抓取网络 -->
+                    <div
+                        class="p-3 rounded-xl bg-slate-50/70 border border-slate-200/60 flex items-center justify-between">
+                        <div class="flex items-center space-x-2.5 min-w-0">
+                            <div
+                                class="w-7 h-7 rounded-lg bg-blue-50/80 text-blue-600 flex items-center justify-center text-xs flex-shrink-0">
+                                <i class="fab fa-telegram-plane"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-slate-800">Telegram 频道</div>
+                                <div class="text-[10px] text-slate-400">公开频道解析</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs font-bold text-slate-900 font-mono" id="source-stat-tg">
+                                {{ summary.sources.telegram.enabled_count }} <span
+                                    class="text-[10px] font-normal text-slate-400">/ {{
+                                    summary.sources.telegram.total_count }} 关注</span>
+                            </div>
+                            <div class="text-[10px] text-emerald-600 font-medium">{{
+                                summary.sources.telegram.healthy_count }} 频道正常</div>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 flex items-center justify-end">
+                        <a href="{{ url_for('search_sources.sources_page') }}"
+                            class="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center group">
+                            <span>前往搜索源管理</span>
+                            <i
+                                class="fas fa-arrow-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-blue-400"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Tab 2: 网盘转存凭证就绪状态 -->
+                <div id="tabEngineCredentialsContent" class="mt-4 space-y-3" style="display: none;">
+                    <div class="text-[11px] font-semibold text-slate-500 flex items-center justify-between">
+                        <span>网盘账号池就绪状态</span>
+                        <span class="text-slate-400 font-mono text-[10px]">{{ summary.credentials.summary.enabled_count
+                            }}/8 平台就绪</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {% for item in summary.credentials.statuses %}
+                        <div class="p-2 rounded-lg border border-slate-200/70 bg-slate-50/60 flex items-center justify-between"
+                            title="{{ item.description }}">
+                            <div class="flex items-center space-x-1.5 min-w-0">
+                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
+                                    {% if item.status == 'enabled' %}bg-emerald-500
+                                    {% elif item.status == 'invalid' %}bg-amber-500
+                                    {% else %}bg-slate-300{% endif %}"></span>
+                                <span class="text-xs font-medium text-slate-700 truncate">{{ item.cloud_name }}</span>
+                            </div>
+                            <span class="text-[10px] font-medium flex-shrink-0
+                                {% if item.status == 'enabled' %}text-emerald-600 font-semibold
+                                {% elif item.status == 'invalid' %}text-amber-600
+                                {% else %}text-slate-400{% endif %}">
+                                {{ item.title }}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <div
+                        class="pt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-100">
+                        <span>多账号轮询与动态分流</span>
+                        <a href="{{ url_for('system_config.system_config_page', tab='accounts') }}"
+                            class="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center group">
+                            <span>前往网盘账号池</span>
+                            <i
+                                class="fas fa-arrow-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-blue-400"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模块 3: 系统底座与状态概况 (3 cols - 扁平 Key-Value 列表与圆点微标) -->
+        <div
+            class="lg:col-span-3 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col space-y-4">
+            <div>
+                <div class="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-blue-50/80 flex items-center justify-center text-blue-600">
+                            <i class="fas fa-server text-xs"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-sm font-bold text-slate-900 tracking-tight">系统底座与状态</h2>
+                            <p class="text-[11px] text-slate-400">运行环境与核心基础配置</p>
+                        </div>
+                    </div>
+                    <a href="{{ url_for('system_config.system_config_page') }}"
+                        class="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center group">
+                        <span>设置</span>
+                        <i
+                            class="fas fa-arrow-right text-[8px] ml-1 group-hover:translate-x-0.5 transition-transform text-blue-400"></i>
+                    </a>
+                </div>
+
+                <!-- 扁平 Key-Value 列表 -->
+                <div class="space-y-3 mt-4 text-xs">
+                    <!-- SQLite 体积 -->
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100/70">
+                        <span class="text-slate-500">SQLite 数据库体积</span>
+                        <span class="font-bold text-slate-800 font-mono">{{ summary.system.db_size_mb }} MB</span>
+                    </div>
+
+                    <!-- 转存目标目录 -->
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100/70">
+                        <span class="text-slate-500">默认转存目录</span>
+                        <span class="font-mono text-slate-800 text-[11px] truncate max-w-[130px] font-semibold"
+                            title="{{ summary.system.transfer_target_dir or 'Pan-Relay分享' }}">
+                            <i class="fas fa-folder text-indigo-500 text-[10px] mr-1"></i>{{
+                            summary.system.transfer_target_dir or 'Pan-Relay分享' }}
+                        </span>
+                    </div>
+
+                    <!-- 存储保留时长 -->
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100/70">
+                        <span class="text-slate-500">存储保留时长</span>
+                        <span
+                            class="font-bold font-mono {% if summary.system.storage_cleanup_enabled %}text-slate-800{% else %}text-slate-400{% endif %}">
+                            {{ summary.system.retention_display or '15 天' }}{% if not
+                            summary.system.storage_cleanup_enabled %} <span
+                                class="text-[10px] font-normal text-slate-400 font-sans">(未启用)</span>{% endif %}
+                        </span>
+                    </div>
+
+                    <!-- 定时清理周期 -->
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100/70">
+                        <span class="text-slate-500">定时清理周期</span>
+                        <span
+                            class="inline-flex items-center text-[11px] font-medium {% if summary.system.storage_cleanup_enabled %}text-slate-700{% else %}text-slate-400{% endif %}">
+                            <span
+                                class="w-1.5 h-1.5 rounded-full mr-1.5 {% if summary.system.storage_cleanup_enabled %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+                            {% if summary.system.storage_cleanup_enabled %}
+                            {{ summary.system.cleanup_interval_display or '每 12 小时' }}
+                            {% else %}
+                            已关闭
+                            {% endif %}
+                        </span>
+                    </div>
+
+                    <!-- 敏感词风控 -->
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100/70">
+                        <span class="text-slate-500">敏感词安全风控</span>
+                        <span class="inline-flex items-center text-[11px] font-medium text-slate-700">
+                            <span
+                                class="w-1.5 h-1.5 rounded-full mr-1.5 {% if summary.system.sensitive_words_enabled %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+                            {{ '已启用' if summary.system.sensitive_words_enabled else '已关闭' }} ({{
+                            summary.system.sensitive_words_count }}词)
+                        </span>
+                    </div>
+
+                    <!-- 广告关键词过滤 -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-slate-500">广告关键词过滤</span>
+                        <span class="inline-flex items-center text-[11px] font-medium text-slate-700">
+                            <span
+                                class="w-1.5 h-1.5 rounded-full mr-1.5 {% if summary.system.ad_filter_enabled %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+                            {{ '已启用' if summary.system.ad_filter_enabled else '已关闭' }} ({{
+                            summary.system.ad_keywords_count or 0 }}词)
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- =========================================================================
+     快捷新增资源 / 补库 Modal
+     ========================================================================= -->
+<div id="quickAddResourceModal"
+    class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center hidden">
+    <div
+        class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 transform transition-all animate-fade-in relative">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+            <h3 class="text-lg font-bold text-slate-900 flex items-center space-x-2">
+                <i class="fas fa-plus-circle text-blue-600"></i>
+                <span>新增资源入库</span>
+            </h3>
+            <button onclick="closeQuickAddModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                <i class="fas fa-times text-base"></i>
+            </button>
+        </div>
+
+        <form id="quickAddForm" onsubmit="submitQuickAddResource(event)" class="mt-4 space-y-3.5">
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">资源标题 <span
+                        class="text-rose-500">*</span></label>
+                <input type="text" id="quick-res-name" required placeholder="例如：流浪地球2 4K原画"
+                    class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50 focus:bg-white transition-all">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">链接 <span
+                        class="text-rose-500">*</span></label>
+                <input type="text" id="quick-res-link" required placeholder="例如：https://pan.quark.cn/s/..."
+                    class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50 focus:bg-white transition-all">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">分类类型</label>
+                <select id="quick-res-type"
+                    class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50 focus:bg-white transition-all">
+                    <option value="">请选择类型（可选）</option>
+                    <option value="电影">电影</option>
+                    <option value="电视剧">电视剧</option>
+                    <option value="音乐">音乐</option>
+                    <option value="软件">软件</option>
+                    <option value="图片">图片</option>
+                    <option value="游戏">游戏</option>
+                    <option value="素材">素材</option>
+                    <option value="教程">教程</option>
+                    <option value="文档">文档</option>
+                    <option value="其他">其他</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">运营备注</label>
+                <textarea id="quick-res-remarks" rows="2" placeholder="可选填写提取码或特别说明"
+                    class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50 focus:bg-white transition-all"></textarea>
+            </div>
+
+            <!-- 自动转存并入库策略配置 -->
+            <div class="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-semibold text-slate-700 block">自动转存至我的网盘</span>
+                        <span class="text-[11px] text-slate-400 font-normal">开启后将自动转存到已配置凭证的网盘并生成专属链接</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+                        <input type="checkbox" id="quickAddTransferToggle"
+                            onchange="toggleQuickTransferOptions(this.checked)" class="sr-only peer">
+                        <div
+                            class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600">
+                        </div>
+                    </label>
+                </div>
+
+                <div id="quickTransferOptions" class="hidden pt-2.5 border-t border-slate-200/60">
+                    <div id="quickLinkTransferHint"
+                        class="text-xs p-2.5 rounded-lg bg-blue-50/70 text-blue-700 border border-blue-100/80">
+                        <!-- 动态提示当前链接是否匹配已就绪凭证 -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-3 flex justify-end space-x-2.5 border-t border-slate-100">
+                <button type="button" onclick="closeQuickAddModal()"
+                    class="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">取消</button>
+                <button type="submit" id="quickAddSubmitBtn"
+                    class="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-xs flex items-center gap-1.5">
+                    <i class="fas fa-save text-[10px]"></i>
+                    <span>直接入库</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/resource.js') }}?v=2.0.4"></script>
+<script>
+    function toggleQuickTransferOptions(enabled) {
+        const submitBtn = document.getElementById('quickAddSubmitBtn');
+        if (submitBtn) {
+            submitBtn.innerHTML = enabled
+                ? '<i class="fas fa-cloud-upload-alt text-[10px]"></i> <span>转存并入库</span>'
+                : '<i class="fas fa-save text-[10px]"></i> <span>直接入库</span>';
+        }
+        updateQuickLinkTransferHint();
+    }
+
+    function updateQuickLinkTransferHint() {
+        const opts = document.getElementById('quickTransferOptions');
+        const hintEl = document.getElementById('quickLinkTransferHint');
+        if (!opts || !hintEl) return;
+
+        const linkInput = document.getElementById('quick-res-link');
+        const link = linkInput ? linkInput.value.trim() : '';
+        const toggle = document.getElementById('quickAddTransferToggle');
+        const isTransferEnabled = toggle ? toggle.checked : false;
+
+        if (!isTransferEnabled || !link) {
+            opts.classList.add('hidden');
+            hintEl.innerHTML = '';
+            return;
+        }
+
+        const cloudName = typeof matchNetdiskLink === 'function' ? matchNetdiskLink(link) : '其他';
+        const credMap = typeof netdiskCredentialsMap !== 'undefined' ? netdiskCredentialsMap : {};
+        const cred = credMap[cloudName];
+
+        if (!cred || cloudName === '其他') {
+            hintEl.className = 'text-xs p-2.5 rounded-lg bg-amber-50/90 text-amber-800 border border-amber-200/80 flex items-center gap-1.5';
+            hintEl.innerHTML = `<i class="fas fa-exclamation-triangle text-amber-500 flex-shrink-0"></i> <span>当前识别为「${cloudName}」，暂不支持自动转存，将按原始链接直接入库。</span>`;
+            opts.classList.remove('hidden');
+        } else if (cred.status === 'enabled') {
+            hintEl.className = 'text-xs p-2.5 rounded-lg bg-emerald-50/90 text-emerald-800 border border-emerald-200/80 flex items-center gap-1.5';
+            hintEl.innerHTML = `<i class="fas fa-check-circle text-emerald-500 flex-shrink-0"></i> <span>已识别到 <strong>${cloudName}</strong> 链接，且凭证已就绪。提交后将自动转存生成专属链接。</span>`;
+            opts.classList.remove('hidden');
+        } else {
+            hintEl.className = 'text-xs p-2.5 rounded-lg bg-rose-50/90 text-rose-800 border border-rose-200/80 flex items-center justify-between gap-1.5';
+            hintEl.innerHTML = `
+                <div class="flex items-center gap-1.5 truncate">
+                    <i class="fas fa-info-circle text-rose-500 flex-shrink-0"></i>
+                    <span class="truncate">已识别到 <strong>${cloudName}</strong> 链接，但账号池中未配置可用账号，将按原始链接入库。</span>
+                </div>
+                <a href="/admin/system-config?tab=accounts" target="_blank" class="text-rose-700 underline font-medium text-xs whitespace-nowrap ml-2 flex-shrink-0">去添加账号 &rarr;</a>
+            `;
+            opts.classList.remove('hidden');
+        }
+    }
+
+    function openQuickAddModal(prefillTitle = '') {
+        document.getElementById('quickAddResourceModal').classList.remove('hidden');
+        if (prefillTitle) {
+            const nameInput = document.getElementById('quick-res-name');
+            if (nameInput) nameInput.value = prefillTitle;
+        }
+        if (typeof loadNetdiskCredentials === 'function') {
+            loadNetdiskCredentials();
+        }
+        updateQuickLinkTransferHint();
+    }
+
+    function closeQuickAddModal() {
+        document.getElementById('quickAddResourceModal').classList.add('hidden');
+        const form = document.getElementById('quickAddForm');
+        if (form) form.reset();
+        const toggle = document.getElementById('quickAddTransferToggle');
+        if (toggle) toggle.checked = false;
+        toggleQuickTransferOptions(false);
+    }
+
+    // 绑定链接变化监听
+    document.addEventListener('DOMContentLoaded', () => {
+        const linkEl = document.getElementById('quick-res-link');
+        if (linkEl) {
+            ['input', 'change', 'paste', 'blur'].forEach(evt => {
+                linkEl.addEventListener(evt, () => setTimeout(updateQuickLinkTransferHint, 50));
+            });
+        }
+    });
+
+    function submitQuickAddResource(e) {
+        e.preventDefault();
+        const shareLink = document.getElementById('quick-res-link').value.trim();
+        const cloudName = typeof matchNetdiskLink === 'function' ? matchNetdiskLink(shareLink) : '';
+        const toggle = document.getElementById('quickAddTransferToggle');
+        const isTransfer = toggle ? toggle.checked : false;
+        const saveToNetdisk = isTransfer && typeof getActiveTransferNetdiskConfig === 'function'
+            ? getActiveTransferNetdiskConfig()
+            : {};
+
+        const submitBtn = document.getElementById('quickAddSubmitBtn');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = isTransfer
+                ? '<i class="fas fa-spinner fa-spin text-[10px]"></i> <span>正在转存并入库...</span>'
+                : '<i class="fas fa-spinner fa-spin text-[10px]"></i> <span>保存中...</span>';
+        }
+
+        const payload = {
+            name: document.getElementById('quick-res-name').value.trim(),
+            share_link: shareLink,
+            cloud_name: cloudName,
+            type: document.getElementById('quick-res-type').value,
+            remarks: document.getElementById('quick-res-remarks').value.trim(),
+            save_to_netdisk: saveToNetdisk
+        };
+
+        fetch('/admin/api/resources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+            .then(res => res.json())
+            .then(res => {
+                if (res.success) {
+                    if (typeof showToast === 'function') {
+                        showToast(res.message || (isTransfer ? '资源转存并入库成功' : '资源已直接入库'), 'success');
+                    }
+                    closeQuickAddModal();
+                    refreshDashboardStats();
+                } else {
+                    if (typeof showToast === 'function') {
+                        showToast(res.message || '入库失败', 'error');
+                    }
+                }
+            })
+            .catch(err => {
+                if (typeof showToast === 'function') showToast('请求失败，请检查网络', 'error');
+            })
+            .finally(() => {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    const currentToggle = document.getElementById('quickAddTransferToggle');
+                    toggleQuickTransferOptions(currentToggle ? currentToggle.checked : false);
+                }
+            });
+    }
+
+    function initChartInteractions() {
+        document.querySelectorAll('.chart-container').forEach(container => {
+            const tooltip = container.querySelector('.chart-tooltip');
+            const guideLine = container.querySelector('.chart-guide-line');
+            const callsDot = container.querySelector('.calls-dot');
+            const succDot = container.querySelector('.succ-dot');
+            const svg = container.querySelector('svg');
+            if (!tooltip || !svg) return;
+
+            const triggers = container.querySelectorAll('.chart-col-trigger');
+
+            function showTooltip(el) {
+                const date = el.dataset.date;
+                const calls = el.dataset.calls;
+                const successes = el.dataset.successes;
+                const failures = el.dataset.failures;
+                const cx = parseFloat(el.dataset.cx);
+                const cyCalls = parseFloat(el.dataset.cyCalls);
+                const cySucc = parseFloat(el.dataset.cySucc);
+
+                if (guideLine) {
+                    guideLine.setAttribute('x1', cx);
+                    guideLine.setAttribute('x2', cx);
+                    guideLine.style.display = 'block';
+                }
+
+                if (callsDot && !isNaN(cyCalls)) {
+                    callsDot.setAttribute('cx', cx);
+                    callsDot.setAttribute('cy', cyCalls);
+                    callsDot.style.display = 'block';
+                }
+
+                if (succDot && !isNaN(cySucc)) {
+                    succDot.setAttribute('cx', cx);
+                    succDot.setAttribute('cy', cySucc);
+                    succDot.style.display = 'block';
+                }
+
+                const failCount = parseInt(failures) || 0;
+                tooltip.innerHTML = `
+                    <div class="tt-title">${date}</div>
+                    <div class="tt-row">
+                        <span style="display:flex;align-items:center;gap:6px"><i class="tt-dot" style="background:#4f46e5"></i>总搜索次数</span>
+                        <strong>${calls} 次</strong>
+                    </div>
+                    <div class="tt-row">
+                        <span style="display:flex;align-items:center;gap:6px"><i class="tt-dot" style="background:#10b981"></i>有效命中</span>
+                        <strong>${successes} 次</strong>
+                    </div>
+                    ${failCount > 0 ? `
+                    <div class="tt-row">
+                        <span style="display:flex;align-items:center;gap:6px"><i class="tt-dot" style="background:#ef4444"></i>搜空流失</span>
+                        <strong>${failCount} 次</strong>
+                    </div>` : ''}
+                `;
+                tooltip.classList.add('active');
+
+                const containerRect = container.getBoundingClientRect();
+                const svgRect = svg.getBoundingClientRect();
+                const scaleX = svgRect.width / 720;
+                const targetX = (cx * scaleX) + (svgRect.left - containerRect.left);
+
+                let tooltipWidth = tooltip.offsetWidth || 130;
+                let left = targetX - (tooltipWidth / 2);
+
+                if (left < 10) left = 10;
+                if (left + tooltipWidth > containerRect.width - 10) {
+                    left = containerRect.width - tooltipWidth - 10;
+                }
+
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = '10px';
+            }
+
+            function hideTooltip() {
+                if (tooltip) tooltip.classList.remove('active');
+                if (guideLine) guideLine.style.display = 'none';
+                if (callsDot) callsDot.style.display = 'none';
+                if (succDot) succDot.style.display = 'none';
+            }
+
+            triggers.forEach(trig => {
+                ['mouseenter', 'mousemove', 'click', 'touchstart'].forEach(evt => {
+                    trig.addEventListener(evt, () => {
+                        showTooltip(trig);
+                    }, { passive: true });
+                });
+            });
+
+            container.addEventListener('mouseleave', hideTooltip);
+        });
+    }
+
+    function initDonutInteractions() {
+        document.querySelectorAll('.pie-wrapper').forEach(wrapper => {
+            const centerVal = wrapper.querySelector('.pie-center-val');
+            const centerLbl = wrapper.querySelector('.pie-center-lbl');
+            const centerSub = wrapper.querySelector('.pie-center-sub');
+            if (!centerVal || !centerLbl) return;
+
+            const defaultVal = centerVal.textContent;
+            const defaultLbl = centerLbl.textContent;
+            const defaultSub = centerSub ? centerSub.textContent : '';
+
+            const slices = wrapper.querySelectorAll('.pie-slice');
+            const pills = wrapper.querySelectorAll('.pie-pill-item');
+
+            function activate(el) {
+                const platform = el.dataset.platform;
+                const calls = el.dataset.calls || '0';
+                const percent = el.dataset.percent || '0%';
+                const rate = el.dataset.rate || '100.0%';
+                const color = el.dataset.color || '#4f46e5';
+
+                centerLbl.textContent = `${platform} (${percent})`;
+                centerLbl.style.fontWeight = '600';
+                centerLbl.style.color = color;
+
+                centerVal.textContent = `${calls} 次`;
+                centerVal.style.fontSize = calls.length > 7 ? '18px' : '20px';
+
+                if (centerSub) {
+                    centerSub.innerHTML = `<span style="color:#94a3b8;font-size:10.5px;font-weight:400">成功率</span> <span style="color:#475569;font-weight:600">${rate}</span>`;
+                }
+
+                slices.forEach(s => {
+                    if (s.dataset.platform === platform) s.classList.add('active');
+                    else s.classList.remove('active');
+                });
+                pills.forEach(p => {
+                    if (p.dataset.platform === platform) p.classList.add('active');
+                    else p.classList.remove('active');
+                });
+            }
+
+            function reset() {
+                centerLbl.textContent = defaultLbl;
+                centerLbl.style.fontWeight = '';
+                centerLbl.style.color = '';
+                centerVal.textContent = defaultVal;
+                centerVal.style.fontSize = '';
+
+                if (centerSub) {
+                    centerSub.innerHTML = defaultSub;
+                }
+
+                slices.forEach(s => s.classList.remove('active'));
+                pills.forEach(p => p.classList.remove('active'));
+            }
+
+            slices.forEach(slice => {
+                slice.addEventListener('mouseenter', () => activate(slice));
+                slice.addEventListener('mouseleave', reset);
+            });
+
+            pills.forEach(pill => {
+                pill.addEventListener('mouseenter', () => activate(pill));
+                pill.addEventListener('mouseleave', reset);
+            });
+
+            wrapper.addEventListener('mouseleave', reset);
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initChartInteractions();
+        initDonutInteractions();
+    });
+
+    function refreshDashboardStats() {
+        const icon = document.getElementById('refresh-icon');
+        if (icon) icon.classList.add('fa-spin');
+
+        const params = new URLSearchParams(window.location.search);
+        const days = params.get('days') || '7';
+
+        fetch(`/admin/api/dashboard/stats?days=${days}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.data) {
+                    const s = data.data;
+                    // KPI 1: 私有资源储备
+                    if (s.resources) {
+                        const totalEl = document.getElementById('stat-resources-total');
+                        if (totalEl) totalEl.textContent = s.resources.total_count || 0;
+                        const repEl = document.getElementById('stat-resources-replaced');
+                        if (repEl) repEl.textContent = s.resources.replaced_count || 0;
+                        const cloudsEl = document.getElementById('stat-resources-clouds');
+                        if (cloudsEl) cloudsEl.textContent = (s.resources.cloud_distribution || []).length;
+                    }
+
+                    // 搜索源通道
+                    if (s.sources) {
+                        const apiEl = document.getElementById('source-stat-api');
+                        if (apiEl && s.sources.api) {
+                            apiEl.innerHTML = `${s.sources.api.enabled_count} <span class="text-[10px] font-normal text-slate-400">/ ${s.sources.api.total_count} 启用</span>`;
+                        }
+                        const plugEl = document.getElementById('source-stat-plugins');
+                        if (plugEl && s.sources.plugins) {
+                            plugEl.innerHTML = `${s.sources.plugins.enabled_count} <span class="text-[10px] font-normal text-slate-400">/ ${s.sources.plugins.total_count} 开启</span>`;
+                        }
+                        const tgEl = document.getElementById('source-stat-tg');
+                        if (tgEl && s.sources.telegram) {
+                            tgEl.innerHTML = `${s.sources.telegram.enabled_count} <span class="text-[10px] font-normal text-slate-400">/ ${s.sources.telegram.total_count} 关注</span>`;
+                        }
+                    }
+
+                    // KPI 2: 今日搜索活跃 & KPI 4: 今日转存转化
+                    if (s.logs) {
+                        const l = s.logs;
+                        const todaySearchEl = document.getElementById('stat-today-search');
+                        if (todaySearchEl) todaySearchEl.textContent = l.today_search || 0;
+                        const todayAvgDurEl = document.getElementById('stat-today-avg-dur');
+                        if (todayAvgDurEl) todayAvgDurEl.textContent = l.today_avg_duration_ms || 0;
+
+                        const todayTransferEl = document.getElementById('stat-transfer-total');
+                        if (todayTransferEl) todayTransferEl.textContent = l.today_transfer || 0;
+                        const transferSuccCountEl = document.getElementById('stat-transfer-success-count');
+                        if (transferSuccCountEl) transferSuccCountEl.textContent = l.today_transfer_success || 0;
+
+                        const transferBadgeEl = document.getElementById('stat-transfer-badge');
+                        if (transferBadgeEl) {
+                            if ((l.today_transfer || 0) > 0) {
+                                transferBadgeEl.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100/80';
+                                transferBadgeEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full mr-1.5 bg-emerald-500"></span>${l.today_transfer_success_rate || 100}% 成功`;
+                            } else {
+                                transferBadgeEl.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200/60';
+                                transferBadgeEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full mr-1.5 bg-slate-400"></span>专属换链';
+                            }
+                        }
+                    }
+
+                    // KPI 3: 搜索供给命中率
+                    if (s.search_analytics) {
+                        const sa = s.search_analytics;
+                        const hitRateEl = document.getElementById('stat-hit-rate');
+                        if (hitRateEl) hitRateEl.textContent = `${sa.today_hit_rate || 100}%`;
+                        const hitCountEl = document.getElementById('stat-hit-count');
+                        if (hitCountEl) hitCountEl.textContent = sa.today_hit_searches || 0;
+
+                        const hitBadgeEl = document.getElementById('stat-hit-badge');
+                        if (hitBadgeEl) {
+                            if ((sa.today_zero_searches || 0) > 0) {
+                                hitBadgeEl.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-100/80';
+                                hitBadgeEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full mr-1.5 bg-rose-500"></span>搜空 ${sa.today_zero_searches} 次`;
+                            } else {
+                                hitBadgeEl.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100/80';
+                                hitBadgeEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full mr-1.5 bg-emerald-500"></span>供给充足';
+                            }
+                        }
+
+                        const searchChannelsEl = document.getElementById('stat-search-channels');
+                        if (searchChannelsEl) searchChannelsEl.textContent = `Web ${sa.today_web_searches || 0} · API ${sa.today_api_searches || 0}`;
+                    }
+
+                    // Top 热门搜索词与零结果搜索词榜单动态更新
+                    if (s.top_hot_keywords && Array.isArray(s.top_hot_keywords)) {
+                        const hotListEl = document.getElementById('dashTopHotKeywordsProgressList');
+                        if (hotListEl) {
+                            if (s.top_hot_keywords.length > 0) {
+                                hotListEl.innerHTML = s.top_hot_keywords.map((item, idx) => {
+                                    const rankClass = idx === 0 ? 'bg-amber-100 text-amber-800' : (idx < 3 ? 'bg-slate-200 text-slate-700' : 'bg-slate-100 text-slate-500');
+                                    const safeKw = escapeHtml(item.keyword);
+                                    const avgBadge = item.avg_results > 0
+                                        ? `<span class="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 font-medium">均产 ${item.avg_results}</span>`
+                                        : `<span class="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-100 font-medium">无产出</span>`;
+                                    return `
+                                        <div class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-50/80 transition-colors text-xs">
+                                            <span class="flex items-center gap-2 font-semibold text-slate-800 truncate min-w-0 pr-2">
+                                                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0 ${rankClass}">${idx + 1}</span>
+                                                <a href="/?keyword=${encodeURIComponent(item.keyword)}" target="_blank" class="truncate hover:text-indigo-600 transition-colors" title="前台检索：${safeKw}">${safeKw}</a>
+                                            </span>
+                                            <div class="flex items-center gap-2 shrink-0">
+                                                <span class="font-bold text-slate-700 font-mono text-[11px]">${item.count} 次</span>
+                                                ${avgBadge}
+                                                <a href="/?keyword=${encodeURIComponent(item.keyword)}" target="_blank" class="w-4.5 h-4.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 flex items-center justify-center transition" title="前台验证搜索">
+                                                    <i class="fas fa-external-link-alt text-[8px]"></i>
+                                                </a>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('');
+                            }
+                        }
+                    }
+
+                    if (s.top_zero_keywords && Array.isArray(s.top_zero_keywords)) {
+                        const zeroListEl = document.getElementById('dashTopZeroKeywordsProgressList');
+                        if (zeroListEl) {
+                            if (s.top_zero_keywords.length > 0) {
+                                zeroListEl.innerHTML = s.top_zero_keywords.map((item, idx) => {
+                                    const rankClass = idx === 0 ? 'bg-amber-100 text-amber-800' : (idx < 3 ? 'bg-slate-200 text-slate-700' : 'bg-slate-100 text-slate-500');
+                                    const safeKw = escapeHtml(item.keyword);
+                                    return `
+                                        <div class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-50/80 transition-colors text-xs">
+                                            <span class="flex items-center gap-2 font-semibold text-slate-800 truncate min-w-0 pr-2">
+                                                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0 ${rankClass}">${idx + 1}</span>
+                                                <span class="truncate hover:text-amber-700 transition-colors cursor-pointer" title="${safeKw}" onclick="openQuickAddModal('${safeKw}')">${safeKw}</span>
+                                            </span>
+                                            <div class="flex items-center gap-2 shrink-0">
+                                                <span class="font-bold text-amber-700 font-mono text-[11px]">${item.count} 次</span>
+                                                <button type="button" onclick="openQuickAddModal('${safeKw}')" class="px-1.5 py-0.2 rounded bg-white hover:bg-amber-50 text-amber-800 font-medium text-[10px] transition border border-amber-200 shadow-2xs flex items-center gap-0.5" title="一键录入该资源到私有库">
+                                                    <i class="fas fa-plus text-[7px] text-amber-600"></i> 补库
+                                                </button>
+                                                <a href="/?keyword=${encodeURIComponent(item.keyword)}" target="_blank" class="w-4.5 h-4.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 flex items-center justify-center transition" title="前台验证搜索">
+                                                    <i class="fas fa-external-link-alt text-[8px]"></i>
+                                                </a>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('');
+                            }
+                        }
+                    }
+
+                    if (s.system) {
+                        const webBadge = document.getElementById('dash-header-web-badge');
+                        if (webBadge) {
+                            const isWebOn = !!s.system.enable_frontend;
+                            webBadge.className = `inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 shadow-2xs transition-colors group ${isWebOn ? 'text-slate-700 hover:text-slate-900' : 'text-slate-400 hover:text-slate-600'}`;
+                            webBadge.title = `Web 前台服务 (点击前往配置 · ${isWebOn ? '已启用' : '已关闭'})`;
+                            const dot = webBadge.querySelector('span:first-child');
+                            if (dot) dot.className = `w-2 h-2 rounded-full mr-2 ${isWebOn ? 'bg-emerald-500 ring-2 ring-emerald-100' : 'bg-slate-300'}`;
+                        }
+
+                        const apiBadge = document.getElementById('dash-header-api-badge');
+                        if (apiBadge) {
+                            const isApiOn = !!s.system.public_search_api_enabled;
+                            apiBadge.className = `inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 shadow-2xs transition-colors group ${isApiOn ? 'text-slate-700 hover:text-slate-900' : 'text-slate-400 hover:text-slate-600'}`;
+                            apiBadge.title = `开放 API 服务 (点击前往配置 · ${isApiOn ? '已启用' : '已关闭'})`;
+                            const dot = apiBadge.querySelector('span:first-child');
+                            if (dot) dot.className = `w-2 h-2 rounded-full mr-2 ${isApiOn ? 'bg-emerald-500 ring-2 ring-emerald-100' : 'bg-slate-300'}`;
+                        }
+                    }
+                    if (typeof showToast === 'function') showToast('仪表盘指标已刷新', 'success');
+                }
+            })
+            .catch(err => {
+                console.error('刷新仪表盘指标失败:', err);
+            })
+            .finally(() => {
+                if (icon) icon.classList.remove('fa-spin');
+            });
+    }
+
+    function switchKeywordTab(tab) {
+        const btnHot = document.getElementById('tabBtnHotKeywords');
+        const btnZero = document.getElementById('tabBtnZeroKeywords');
+        const contentHot = document.getElementById('tabHotKeywordsContent');
+        const contentZero = document.getElementById('tabZeroKeywordsContent');
+        const iconEl = document.getElementById('tabKeywordIcon');
+        const titleEl = document.getElementById('tabKeywordTitle');
+        const badgeEl = document.getElementById('tabKeywordBadge');
+        const subtitleEl = document.getElementById('tabKeywordSubtitle');
+        const quickAddBtn = document.getElementById('btnQuickAddInCard');
+
+        const currentDays = parseInt('{{ current_days }}', 10) || 7;
+        const periodText = currentDays === 0 ? '全部历史' : `近 ${currentDays} 天`;
+
+        if (tab === 'zero') {
+            if (btnHot) btnHot.className = 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition';
+            if (btnZero) btnZero.className = 'px-2.5 py-1 rounded-md text-xs font-semibold bg-white text-amber-700 shadow-2xs transition';
+            if (contentHot) contentHot.style.display = 'none';
+            if (contentZero) contentZero.style.display = 'block';
+
+            if (iconEl) {
+                iconEl.className = 'w-7 h-7 rounded-lg bg-amber-50/80 flex items-center justify-center text-amber-700 transition-colors';
+                iconEl.innerHTML = '<i class="fas fa-box-open text-xs"></i>';
+            }
+            if (titleEl) titleEl.textContent = '搜空待补库 Top 10';
+            if (badgeEl) {
+                badgeEl.className = 'text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/60';
+                badgeEl.textContent = '补库指南';
+            }
+            if (subtitleEl) subtitleEl.textContent = `${periodText}搜空流失词榜与一键定向录入转化`;
+            if (quickAddBtn) quickAddBtn.style.display = 'flex';
+        } else {
+            if (btnHot) btnHot.className = 'px-2.5 py-1 rounded-md text-xs font-semibold bg-white text-indigo-600 shadow-2xs transition';
+            if (btnZero) btnZero.className = 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition';
+            if (contentHot) contentHot.style.display = 'block';
+            if (contentZero) contentZero.style.display = 'none';
+
+            if (iconEl) {
+                iconEl.className = 'w-7 h-7 rounded-lg bg-indigo-50/80 flex items-center justify-center text-indigo-600 transition-colors';
+                iconEl.innerHTML = '<i class="fas fa-fire text-xs"></i>';
+            }
+            if (titleEl) titleEl.textContent = '热门搜索词 Top 10';
+            if (badgeEl) {
+                badgeEl.className = 'text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/60';
+                badgeEl.textContent = '真实检索';
+            }
+            if (subtitleEl) subtitleEl.textContent = `${periodText}全站真实高频检索关键词榜单与热度排行`;
+            if (quickAddBtn) quickAddBtn.style.display = 'none';
+        }
+    }
+
+    function switchEngineTab(tab) {
+        const btnChannels = document.getElementById('tabBtnEngineChannels');
+        const btnCredentials = document.getElementById('tabBtnEngineCredentials');
+        const contentChannels = document.getElementById('tabEngineChannelsContent');
+        const contentCredentials = document.getElementById('tabEngineCredentialsContent');
+        const titleEl = document.getElementById('tabEngineTitle');
+        const subtitleEl = document.getElementById('tabEngineSubtitle');
+        const iconEl = document.getElementById('tabEngineIcon');
+
+        if (!btnChannels || !btnCredentials || !contentChannels || !contentCredentials) return;
+
+        if (tab === 'channels') {
+            btnChannels.className = 'px-2.5 py-0.5 rounded-md text-xs font-semibold bg-white text-blue-600 shadow-2xs transition';
+            btnCredentials.className = 'px-2.5 py-0.5 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition';
+            contentChannels.style.display = 'block';
+            contentCredentials.style.display = 'none';
+            if (titleEl) titleEl.textContent = '搜索源通道集群';
+            if (subtitleEl) subtitleEl.textContent = 'API、插件与 Telegram 抓取网络';
+            if (iconEl) {
+                iconEl.className = 'w-8 h-8 rounded-xl bg-blue-50/80 flex items-center justify-center text-blue-600 transition-colors';
+                iconEl.innerHTML = '<i class="fas fa-network-wired text-xs"></i>';
+            }
+        } else {
+            btnCredentials.className = 'px-2.5 py-0.5 rounded-md text-xs font-semibold bg-white text-blue-600 shadow-2xs transition';
+            btnChannels.className = 'px-2.5 py-0.5 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 transition';
+            contentChannels.style.display = 'none';
+            contentCredentials.style.display = 'block';
+            if (titleEl) titleEl.textContent = '网盘转存与凭证状态';
+            if (subtitleEl) subtitleEl.textContent = '8大网盘就绪状态与转存配置';
+            if (iconEl) {
+                iconEl.className = 'w-8 h-8 rounded-xl bg-blue-50/80 flex items-center justify-center text-blue-600 transition-colors';
+                iconEl.innerHTML = '<i class="fas fa-hdd text-xs"></i>';
+            }
+        }
+    }
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+</script>
+{% endblock %}

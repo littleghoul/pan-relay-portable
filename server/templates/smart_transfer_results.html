@@ -1,0 +1,22 @@
+{% extends "admin_layout.html" %}
+{% set active_page = 'resources' %}
+{% block content %}
+<div style="padding:24px;max-width:1200px;margin:auto">
+    <h1 class="text-xl font-bold">本次转存结果</h1>
+    <div class="flex gap-3 my-4">
+        <a class="btn btn-secondary" href="/admin/resources">返回我的资源 / 重新识别</a>
+        <button class="btn btn-primary" id="personalExcelExportBtn">导出我的分享 Excel</button>
+        <span id="personalExcelExportStatus" role="status"></span>
+        <a id="personalExcelDownload" hidden download="personal-shares.xlsx">再次下载 Excel</a>
+    </div>
+    <p id="smartResultSummary" class="my-3" role="status"></p>
+    <div class="data-table-shell"><table class="table">
+        <thead><tr><th>资源名称</th><th>网盘</th><th>结果</th><th>新分享链接 / 失败原因</th></tr></thead>
+        <tbody id="smartResultRows"></tbody>
+    </table></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static',filename='js/personal_export.js') }}"></script>
+<script src="{{ url_for('static',filename='js/smart_transfer_results.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,171 @@
+import logging
+
+from src.db.resources import (
+    list_resources as db_list_resources,
+    get_resource_by_id,
+    insert_resource_simple,
+    update_resource_basic_info,
+    delete_resource_by_id,
+)
+from src.pan_operator import create_share, del_share, _get_transfer_lock
+
+logger = logging.getLogger(__name__)
+
+
+def list_resources(page: int = 1, page_size: int = 10, search: str = "", sort_by: str = "id", order: str = "desc"):
+    """获取资源列表，支持分页、搜索与排序"""
+    return db_list_resources(page=page, page_size=page_size, search=search, sort_by=sort_by, order=order)
+
+
+def get_resource_detail(resource_id: int):
+    """获取单个资源详情"""
+    return get_resource_by_id(resource_id)
+
+
+def add_resource_and_share(resource_data: dict):
+    if not isinstance(resource_data, dict):
+        return False, "标题和链接为必填项", None
+    with _get_transfer_lock(resource_data.get('share_link') or ''):
+        return _add_resource_and_share(resource_data)
+
+
+def _add_resource_and_share(resource_data: dict):
+    """
+    添加新资源。
+    所有资源直接保存到数据库，然后调用 create_share 方法处理网盘替换。
+    若资源链接已存在，则复用现有记录并发起转存。
+    """
+    if not resource_data.get("name") or not resource_data.get("share_link"):
+        return False, "标题和链接为必填项", None
+
+    share_link = resource_data["share_link"].strip()
+    resource_data["share_link"] = share_link
+
+    if not resource_data.get("cloud_name"):
+        from src.utils.netdisk_utils import match_netdisk_link
+        resource_data["cloud_name"] = match_netdisk_link(share_link)
+
+    save_to_netdisk = resource_data.get("save_to_netdisk", {}) or {}
+    should_create_share = any(save_to_netdisk.values())
+
+    # 检查数据库是否已存在该链接
+    from src.db.resources import get_resource_by_share_link
+    existing = get_resource_by_share_link(share_link)
+
+    if existing:
+        target_id = existing["id"]
+        if existing.get('is_replaced') and existing.get('file_id'):
+            return True, "资源已转存，复用已生成的分享链接", target_id
+        logger.info(f"资源已存在于库中 (ID: {target_id})")
+        if should_create_share:
+            # 用户选择批量转存：复用现有记录 ID 继续发起转存与链接替换
+            share_data = {
+                "id": target_id,
+                "share_url": share_link,
+                "title": resource_data.get("name") or existing.get("name"),
+                "cloud_name": resource_data.get("cloud_name") or existing.get("cloud_name"),
+                "resource_type": resource_data.get("type") or existing.get("type"),
+                "remark": resource_data.get("remarks") or existing.get("remarks"),
+                "save_to_netdisk": save_to_netdisk,
+            }
+            try:
+                result = create_share(share_data)
+                if not result or not result.get('is_replaced'):
+                    return False, "转存或创建分享失败，原记录已保留，请检查链接和账号后重试", target_id
+            except Exception as share_err:
+                logger.error(f"调用 create_share 处理资源分享链接时出错: {share_err}")
+                return False, "转存或创建分享失败，原记录已保留，请重试", target_id
+            return True, "已触发转存并更新", target_id
+        else:
+            return True, "资源链接已存在，无需重复导入", target_id
+
+    # 向数据库插入资源
+    success, message, new_id = insert_resource_simple(resource_data)
+    if not success:
+        return False, message, None
+
+    logger.info(f"成功直接添加资源到数据库，标题: {resource_data['name']}")
+
+    if not should_create_share:
+        return True, "资源已直接入库", new_id
+
+    # 调用 create_share 处理网盘替换
+    share_data = {
+        "id": new_id,
+        "share_url": share_link,
+        "title": resource_data["name"],
+        "cloud_name": resource_data.get("cloud_name", ""),
+        "resource_type": resource_data.get("type", ""),
+        "remark": resource_data.get("remarks", ""),
+        "save_to_netdisk": save_to_netdisk,
+    }
+
+    try:
+        result = create_share(share_data)
+        if not result or not result.get('is_replaced'):
+            return False, "转存或创建分享失败，资源已入库但尚未生成新分享链接，请重试", new_id
+    except Exception as share_err:
+        logger.error(f"调用 create_share 处理资源分享链接时出错: {share_err}")
+        return False, "转存或创建分享失败，资源已入库但尚未生成新分享链接，请重试", new_id
+
+    return True, "资源添加成功", new_id
+
+
+def update_resource_info(resource_id: int, resource_data: dict):
+    """更新资源信息（标题、云盘名称、类型和备注）"""
+    if not resource_data.get("name"):
+        return False, "标题为必填项"
+
+    if resource_data.get("share_link") and not resource_data.get("cloud_name"):
+        from src.utils.netdisk_utils import match_netdisk_link
+        resource_data["cloud_name"] = match_netdisk_link(resource_data["share_link"])
+
+    return update_resource_basic_info(resource_id, resource_data)
+
+
+def delete_resource_and_share(resource_id: int, delete_netdisk_file: bool = False):
+    """
+    删除资源。
+    从数据库删除资源记录。
+    如果 delete_netdisk_file 为 True，则将 share_url / file_id 传递给 del_share 方法从物理网盘中删除。
+    """
+    # 从数据库删除资源，同时获取被删除记录的 share_link 和 file_id
+    success, message, resource = get_resource_by_id(resource_id)
+    if not success:
+        return False, message
+
+    if delete_netdisk_file:
+        if not resource.get('account_id') or not resource.get('file_id'):
+            return False, "无法同步删除网盘文件：此资源没有完整的转存账号和文件信息。记录已保留；如只需清理页面，请取消勾选“同步删除物理网盘中的文件/转存文件夹”后重试。"
+        from src.db.accounts import get_account_by_id
+        account = get_account_by_id(resource['account_id'])
+        if not account or not account.get('is_active') or not account.get('is_valid'):
+            return False, "无法同步删除网盘文件：原转存账号已删除、停用或登录失效。记录已保留；请恢复原账号，或取消勾选“同步删除物理网盘中的文件/转存文件夹”以仅删除页面记录。"
+        # 调用 del_share 处理网盘删除
+        try:
+            share_data = {
+                "share_url": resource["share_link"],
+                "file_id": resource["file_id"],
+                "account_id": resource['account_id'],
+                "cloud_name": resource.get('cloud_name'),
+                "preserve_resource_record": True,
+            }
+            if not del_share(share_data):
+                return False, "网盘文件删除失败，资源记录已保留。请检查原账号登录和文件状态；如只需清理页面，请取消勾选同步删除网盘文件后重试。"
+            logger.info(f"调用del_share物理删除网盘资源文件: {resource['share_link']}")
+        except Exception as share_err:
+            logger.error(f"调用del_share处理资源物理删除时出错: {share_err}")
+            return False, "网盘物理删除失败，资源记录已保留，请重试"
+
+    success, message, _ = delete_resource_by_id(resource_id)
+    if not success and message != '资源不存在':
+        return False, message
+
+    try:
+        from src.db.temp_shares import mark_temp_share_deleted_by_url_or_file
+        mark_temp_share_deleted_by_url_or_file(url=resource["share_link"], file_id=resource.get("file_id"))
+    except Exception as temp_err:
+        logger.warning(f"同步标记 temp_share 删除状态异常: {temp_err}")
+
+    return True, "资源删除成功"
+

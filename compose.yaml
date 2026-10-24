@@ -1,0 +1,52 @@
+services:
+  web:
+    build: .
+    image: pan-relay-portable:1.0.0
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-5004}:5004"
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      PANSOU_URL: ${PANSOU_URL:-}
+      XUNLEI_CLIENT_SECRET: ${XUNLEI_CLIENT_SECRET:-}
+      PLUGIN_SEARCH_TIMEOUT: "35"
+      DOCS_TOKEN_FILE: /run/secrets/tencent-token
+      DOCS_SYNC_STATE: /docs-sync-state
+      CROSS_TRANSFER_ENABLED: "0"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./sync-state:/docs-sync-state:ro
+      - ./secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:5004/login',timeout=5).status==200"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+  docs-sync:
+    image: pan-relay-portable:1.0.0
+    restart: unless-stopped
+    working_dir: /app/docs_sync
+    command: ["python", "-u", "worker.py"]
+    environment:
+      SYNC_CONFIG: /app/docs_sync/config.json
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./data:/source:ro
+      - ./sync-state:/state
+      - ./secrets:/run/secrets:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,time; s=json.load(open('/state/status.json')); assert time.time()-s['checked_at']<180"]
+      interval: 60s
+      timeout: 5s
+      retries: 3

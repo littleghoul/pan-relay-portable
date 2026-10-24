@@ -1,0 +1,1256 @@
+{% extends "admin_layout.html" %}
+{% set active_page = 'config_api' %}
+{% set current_tab = current_tab or 'config' %}
+
+{% block title %}开放 API 配置 - Pan-Relay Console{% endblock %}
+
+{% block content %}
+<div id="apiConfigContainer" class="{{ 'max-w-7xl' if current_tab == 'docs' else 'max-w-4xl' }} mx-auto space-y-6 transition-[max-width] duration-200">
+    <!-- Page Header (ucmao admin_modern style) -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h1 class="text-xl font-bold tracking-tight text-slate-900">开放 API 服务配置</h1>
+            <p class="text-xs text-slate-500 mt-0.5">管理开放 REST API 端点、无头运行模式、转存鉴权策略及开发者接入指南</p>
+        </div>
+        <div class="flex items-center space-x-2.5">
+            <button type="button" onclick="openPlaygroundDrawer()"
+                class="btn btn-primary btn-sm flex items-center gap-1.5 shadow-2xs">
+                <i class="fas fa-play text-[10px]"></i>
+                <span>在线接口调试</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 分段控制 Tab 导航 -->
+    <div class="source-tabs-header">
+        <button class="source-tab-btn {{ 'is-active' if current_tab != 'docs' else '' }}" data-api-tab-target="config"
+            onclick="switchApiTab('config')" type="button">
+            <i class="fas fa-sliders-h"></i> API 服务配置
+        </button>
+        <button class="source-tab-btn {{ 'is-active' if current_tab == 'docs' else '' }}" data-api-tab-target="docs"
+            onclick="switchApiTab('docs')" type="button">
+            <i class="fas fa-book-bookmark"></i> 开发者 API 指南
+        </button>
+    </div>
+
+<!-- TAB 1: API 服务配置 -->
+<div id="tab-pane-config" class="api-tab-pane {{ '' if current_tab != 'docs' else 'hidden' }} space-y-6">
+
+    <!-- 1. REST API 开放接口服务控制 -->
+    <section class="admin-panel">
+        <div class="admin-panel-header">
+            <div class="admin-panel-title-area">
+                <h2 class="admin-panel-title">
+                    <i class="fas fa-plug text-purple-600"></i> 开放接口服务
+                </h2>
+                <p class="admin-panel-desc">对外提供标准 REST API 聚合搜索与转存服务端点</p>
+            </div>
+        </div>
+        <div class="admin-panel-body">
+            <div class="divide-y divide-slate-100">
+                <!-- 配置: 开放 REST API 接口 -->
+                <div class="setting-item-row">
+                    <div class="space-y-1 min-w-0 pr-4">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-semibold text-slate-800 text-sm">公开API搜索接口</span>
+                            <code
+                                class="text-[11px] font-mono text-slate-400 bg-slate-100/90 px-1.5 py-0.5 rounded border border-slate-200/50">GET /api/v1/search</code>
+                            <span class="help-tooltip" data-tooltip="关闭后外部应用访问将直接返回 403 (接口已关闭)">
+                                <i class="far fa-circle-question text-xs"></i>
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-500">对外提供聚合搜索 JSON 接口，供小程序或机器人接入</p>
+                    </div>
+                    <div class="flex items-center flex-shrink-0">
+                        <label class="plugin-switch" title="切换开放 API 状态">
+                            <input type="checkbox" id="publicSearchApiToggle" onchange="savePublicSearchApiConfig()">
+                            <span class="plugin-switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. API 默认检索策略 -->
+    <section id="apiDefaultStrategyPanel" class="admin-panel transition-all duration-200">
+        <div class="admin-panel-header">
+            <div class="admin-panel-title-area">
+                <h2 class="admin-panel-title">
+                    <i class="fas fa-sliders-h text-indigo-600"></i> 默认检索策略
+                </h2>
+                <p class="admin-panel-desc">配置 API 默认检索范围及结果上限预设</p>
+            </div>
+        </div>
+        <div class="admin-panel-body">
+            <div class="divide-y divide-slate-100">
+                <!-- 配置 1: API 默认检索作用域 -->
+                <div class="setting-item-row">
+                    <div class="space-y-1 min-w-0 pr-4">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-semibold text-slate-800 text-sm">默认搜索作用域</span>
+                            <span class="help-tooltip" data-tooltip="own 仅查私有收益库 (0服务器开销、毫秒响应)；all 全网并发聚合">
+                                <i class="far fa-circle-question text-xs"></i>
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-500">外部请求未指定 scope 时的默认检索模式</p>
+                    </div>
+                    <div class="flex items-center space-x-3 flex-shrink-0">
+                        <select id="searchScopeSelect" class="form-select form-select-sm" onchange="saveApiModeConfig()"
+                            style="min-width: 160px;">
+                            <option value="all">全网并发聚合</option>
+                            <option value="own">仅私有收益库</option>
+                        </select>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer text-xs select-none px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 has-[:checked]:bg-amber-50 has-[:checked]:border-amber-300 transition whitespace-nowrap flex-shrink-0" title="防护锁：勾选锁定后，外部请求即便传入 ?scope=xxx 也无法覆盖本配置">
+                            <input type="checkbox" id="searchScopeLockToggle" onchange="saveApiModeConfig()" class="hidden peer">
+                            <span class="inline-flex items-center gap-1 text-slate-500 peer-checked:hidden text-[11px] font-medium whitespace-nowrap">
+                                <i class="fas fa-unlock text-slate-400 text-[11px]"></i>
+                                <span>可穿透</span>
+                            </span>
+                            <span class="hidden peer-checked:inline-flex items-center gap-1 text-amber-700 text-[11px] font-bold whitespace-nowrap">
+                                <i class="fas fa-lock text-amber-600 text-[11px]"></i>
+                                <span>已锁定</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 配置 2: API 默认单次条数上限 -->
+                <div class="setting-item-row">
+                    <div class="space-y-1 min-w-0 pr-4">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-semibold text-slate-800 text-sm">默认单次结果上限</span>
+                            <span class="help-tooltip" data-tooltip="外部请求未指定 limit 时的默认单次返回最大条数 (控制带宽与网络负载)">
+                                <i class="far fa-circle-question text-xs"></i>
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-500">外部请求未指定 limit 时的单次返回记录数</p>
+                    </div>
+                    <div class="flex items-center space-x-3 flex-shrink-0">
+                        <div class="relative flex items-center">
+                            <input type="number" id="searchApiLimitInput" min="1" max="1000" step="1"
+                                class="form-control form-control-sm pr-7 text-xs font-mono text-center" style="width: 110px;"
+                                placeholder="50" value="50" onchange="saveApiModeConfig()" onkeydown="if(event.key==='Enter'){saveApiModeConfig();}">
+                            <span class="absolute right-2.5 text-slate-400 text-xs pointer-events-none select-none">条</span>
+                        </div>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer text-xs select-none px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 has-[:checked]:bg-amber-50 has-[:checked]:border-amber-300 transition whitespace-nowrap flex-shrink-0" title="防护锁：勾选锁定后，外部请求即便传入更大 limit 也无法穿透该上限">
+                            <input type="checkbox" id="searchLimitLockToggle" onchange="saveApiModeConfig()" class="hidden peer">
+                            <span class="inline-flex items-center gap-1 text-slate-500 peer-checked:hidden text-[11px] font-medium whitespace-nowrap">
+                                <i class="fas fa-unlock text-slate-400 text-[11px]"></i>
+                                <span>可穿透</span>
+                            </span>
+                            <span class="hidden peer-checked:inline-flex items-center gap-1 text-amber-700 text-[11px] font-bold whitespace-nowrap">
+                                <i class="fas fa-lock text-amber-600 text-[11px]"></i>
+                                <span>已锁定</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+            <!-- 实时 API 默认端点行为折叠预览 (置于卡片最下方，UI 色与 media-parser 一致) -->
+            <div class="mt-4 pt-4 border-t border-slate-100">
+                <details class="rounded-xl overflow-hidden bg-slate-50/80 border border-slate-200/90 transition-all">
+                    <summary class="px-4 py-2.5 bg-slate-100/70 hover:bg-slate-100 cursor-pointer select-none font-sans font-semibold text-xs text-slate-700 flex items-center justify-between transition-colors">
+                        <span class="flex items-center gap-2">
+                            <i class="fas fa-terminal text-indigo-500"></i>
+                            <span>未传参数时的默认端点行为动态预览</span>
+                        </span>
+                        <span class="flex items-center gap-2 text-[11px] text-slate-400 font-normal">
+                            <span class="hidden sm:inline-flex items-center gap-1 text-amber-600/80 me-1">
+                                <i class="fas fa-shield-alt text-amber-500"></i>
+                                <span>防护锁可防止穿透</span>
+                            </span>
+                            <span>点击展开/收起 ▾</span>
+                        </span>
+                    </summary>
+                    <div class="p-3.5 bg-slate-50/90 border-t border-slate-200/80 text-xs overflow-x-auto select-all">
+                        <code id="apiDefaultLivePreview" class="font-mono inline-flex items-center flex-wrap gap-y-1 text-slate-800">
+                            <span class="px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 font-bold text-[11px] me-2 border border-sky-200">GET</span><span class="text-emerald-600 font-semibold">https://</span><span class="text-slate-900 font-bold me-0.5">your-domain.com/api/v1/search</span><span class="text-amber-600 font-bold">?</span><span class="text-indigo-600 font-medium">keyword</span><span class="text-slate-400 font-bold px-0.5">=</span><span class="text-amber-700 font-medium bg-amber-50 px-1 py-0.5 rounded border border-amber-200/60 me-0.5">{kw}</span><span class="text-slate-400 font-bold px-0.5">&amp;</span><span class="text-indigo-600 font-medium">scope</span><span class="text-slate-400 font-bold px-0.5">=</span><span class="text-teal-700 font-medium">all</span><span class="text-slate-400 font-bold px-0.5">&amp;</span><span class="text-indigo-600 font-medium">limit</span><span class="text-slate-400 font-bold px-0.5">=</span><span class="text-blue-700 font-medium">50</span>
+                        </code>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. 转存接口鉴权与安全密钥 -->
+    <section id="transferAuthPanel" class="admin-panel transition-all duration-200">
+        <div class="admin-panel-header">
+            <div class="admin-panel-title-area">
+                <h2 class="admin-panel-title">
+                    <i class="fas fa-key text-amber-500"></i> 转存接口鉴权密钥
+                </h2>
+                <p class="admin-panel-desc">设置敏感写操作接口 (POST /api/v1/transfer) 的访问保护凭证</p>
+            </div>
+        </div>
+        <div class="admin-panel-body">
+            <div class="divide-y divide-slate-100">
+                <!-- 配置: 转存 API 校验 Key -->
+                <div class="setting-item-row">
+                    <div class="space-y-1 min-w-0 pr-4">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-semibold text-slate-800 text-sm">接口访问 Token / Key</span>
+                            <code
+                                class="text-[11px] font-mono text-slate-400 bg-slate-100/90 px-1.5 py-0.5 rounded border border-slate-200/50">POST /api/v1/transfer</code>
+                            <span class="help-tooltip" data-tooltip="留空则公开调用；填写后请求头需携带 X-API-Key 或 Authorization: Bearer <key>">
+                                <i class="far fa-circle-question text-xs"></i>
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-500">保护物理网盘转存接口，防止未经授权的外部请求消耗网盘存储容量</p>
+                    </div>
+                    <div class="flex items-center space-x-2 flex-shrink-0">
+                        <div class="relative flex items-center">
+                            <span class="absolute left-3 text-slate-400 text-xs"><i class="fas fa-lock"></i></span>
+                            <input type="text" id="transferApiKeyInput"
+                                class="form-control form-control-sm pl-8 text-xs font-mono" style="min-width: 170px;"
+                                placeholder="留空则不校验" value="">
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm px-3" onclick="saveApiModeConfig()">
+                            <i class="fas fa-check text-[10px]"></i> 保存
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</div>
+
+<!-- TAB 2: 开发者 API 指南 -->
+<div id="tab-pane-docs" class="api-tab-pane {{ '' if current_tab == 'docs' else 'hidden' }} space-y-6">
+
+    <!-- 纯净文档画布卡片 (Seamless Canvas) -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-6 sm:p-8">
+
+        <!-- 接口 Hero 头部 -->
+        <div
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-8 border-b border-slate-100">
+            <div class="space-y-1">
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <span
+                        class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-blue-50 text-blue-700 border border-blue-200">REST
+                        v1</span>
+                    <span class="text-xs font-semibold text-slate-500">两步走中转与收益沉淀规范</span>
+                </div>
+                <h2 class="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">Pan-Relay 开发者 API 指南</h2>
+            </div>
+        </div>
+
+        <!-- 正文阅读流与固定目录布局 (Layout: Article + Sticky TOC) -->
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_200px] gap-10 items-start">
+            <article class="space-y-10 min-w-0 pb-36">
+
+                <!-- 1. 两步走收益接入工作流 -->
+                <section id="sec-workflow" class="api-doc-section scroll-mt-24 space-y-4">
+                    <h3
+                        class="text-base font-bold text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i class="fas fa-diagram-project text-blue-600"></i> 1. 两步走中转与收益沉淀闭环
+                    </h3>
+                    <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        第三方应用（如微信小程序、APP、Telegram 机器人等）接入本系统时，通过“搜索 -> 转存”两步完成外部资源的识别与专属收益转化：
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-slate-50/70 border border-slate-200/90 rounded-xl p-4 sm:p-5 space-y-2.5">
+                            <div class="flex items-center justify-between gap-2 flex-wrap">
+                                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60">步骤 1 · 检索</span>
+                                <code class="text-[11px] font-mono text-slate-500">GET /api/v1/search</code>
+                            </div>
+                            <h4 class="text-sm font-bold text-slate-800">查询全网或站长收益资源</h4>
+                            <p class="text-xs text-slate-600 leading-relaxed">
+                                传参 <code
+                                    class="bg-white text-blue-700 px-1 py-0.5 rounded border border-slate-200 font-mono">scope=own</code>
+                                仅检索站长私有收益库（0 开销、毫秒响应、全是你的收益链）；传参 <code
+                                    class="bg-white text-slate-700 px-1 py-0.5 rounded border border-slate-200 font-mono">scope=all</code>
+                                进行全网检索。
+                            </p>
+                        </div>
+
+                        <div class="bg-slate-50/70 border border-slate-200/90 rounded-xl p-4 sm:p-5 space-y-2.5">
+                            <div class="flex items-center justify-between gap-2 flex-wrap">
+                                <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">步骤 2 · 转存沉淀</span>
+                                <code class="text-[11px] font-mono text-slate-400">POST /api/v1/transfer</code>
+                            </div>
+                            <h4 class="text-sm font-bold text-slate-800">替换为站长收益分享链接</h4>
+                            <p class="text-xs text-slate-600 leading-relaxed">
+                                用户选中全网资源时，调用转存接口。后端自动保存文件至站长云盘，生成站长专属收益链接，并自动沉淀为站长个人私有资产。
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- 测活保障提示 -->
+                    <div class="p-4 bg-slate-50/70 border border-slate-200/90 rounded-xl text-xs flex items-start gap-3">
+                        <div class="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <i class="fas fa-shield-halved text-xs"></i>
+                        </div>
+                        <div class="space-y-1 min-w-0">
+                            <div class="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                                <span>原生免登录网盘链接测活保障</span>
+                                <span class="text-[11px] font-normal text-slate-400">（覆盖 12 大网盘）</span>
+                            </div>
+                            <p class="text-slate-600 leading-relaxed">
+                                系统内置夸克、百度、阿里、UC、迅雷、123盘、天翼、115、移动云盘、联通云盘、悟空网盘、光鸭云盘的原生免登录探测引擎。步骤 2 转存默认执行前置测活校验（空资源、违规或失效链接直接返回 HTTP 422 拒绝转存），或通过独立测活接口异步检测，杜绝死链入库。
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. 鉴权机制规范 -->
+                <section id="sec-auth" class="api-doc-section scroll-mt-24 space-y-4">
+                    <h3
+                        class="text-base font-bold text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i class="fas fa-key text-amber-500"></i> 2. 接口鉴权机制 (`X-API-Key`)
+                    </h3>
+                    <p class="text-xs sm:text-sm leading-relaxed text-slate-600">
+                        为了避免恶意频繁调用消耗网盘容量，转存接口支持配置 API Key 鉴权：
+                    </p>
+                    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead class="bg-slate-50/80 border-b border-slate-200 text-slate-700 font-semibold">
+                                <tr>
+                                    <th class="px-3.5 py-3" style="width:200px">鉴权方式</th>
+                                    <th class="px-3.5 py-3" style="width:130px">传递位置</th>
+                                    <th class="px-3.5 py-3">语法示例 / 填写说明</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 font-normal">
+                                <tr>
+                                    <td class="px-3.5 py-2.5 font-bold text-slate-800">
+                                        <code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">X-API-Key</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">HTTP Header</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        你的转存 API Key 凭证。<code
+                                            class="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200/50">X-API-Key: &lt;YOUR_API_KEY&gt;</code>
+                                        <span
+                                            class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">推荐</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5 font-bold text-slate-800">
+                                        <code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">Authorization</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">HTTP Header</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        标准 Bearer 格式。<code
+                                            class="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200/50">Authorization: Bearer &lt;YOUR_API_KEY&gt;</code>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5 font-bold text-slate-800">
+                                        <code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">api_key</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">Query / Body</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        URL 或 Body 传参。<code
+                                            class="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200/50">?api_key=&lt;YOUR_API_KEY&gt;</code>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 3. 请求参数与节点规范 -->
+                <section id="sec-params" class="api-doc-section scroll-mt-24 space-y-6">
+                    <h3
+                        class="text-base font-bold text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i class="fas fa-list-check text-indigo-600"></i> 3. API 核心节点规范
+                    </h3>
+
+                    <!-- Endpoint 0: GET /api/v1/status -->
+                    <div class="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div
+                            class="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">GET</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/status</code>
+                            </div>
+                            <span class="text-xs text-slate-500 font-medium">基础概览 · 服务运行状态与 API 模式</span>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <p class="text-slate-600 leading-relaxed">
+                                检查后端服务连通性，并获取当前开启的服务模式（前台 UI、后台管理、默认检索作用域、转存 Key 配置状态及可用 API 端点列表）。无需鉴权。
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Endpoint 1: GET /api/v1/search -->
+                    <div class="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div
+                            class="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">GET</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/search</code>
+                            </div>
+                            <span class="text-xs text-slate-500 font-medium">步骤 1 · 聚合查询资源 (支持实时测活)</span>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead
+                                        class="bg-slate-50/60 border-b border-slate-200 text-slate-700 font-semibold">
+                                        <tr>
+                                            <th class="px-3 py-2" style="width:140px">参数名</th>
+                                            <th class="px-3 py-2" style="width:80px">位置</th>
+                                            <th class="px-3 py-2" style="width:80px">类型</th>
+                                            <th class="px-3 py-2" style="width:80px">必选</th>
+                                            <th class="px-3 py-2">说明</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">keyword</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 font-bold text-rose-600">必选</td>
+                                            <td class="px-3 py-2 text-slate-600">搜索关键词，例如：<code class="font-mono bg-slate-100 px-1 py-0.5 rounded">黑神话</code></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">scope</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600"><code
+                                                    class="text-blue-600 font-bold">own</code>: 仅站长收益库; <code
+                                                    class="text-slate-600 font-bold">all</code>: 全网并发聚合（默认按系统配置）</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">cloud_name</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">指定网盘筛选，支持全称或常见简称/别名（如 百度、阿里、夸克、quark、115、123、uc 等），支持逗号分隔多个</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">limit</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">Integer</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">限制最大返回条数，默认 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">100</code></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Endpoint 1.5: GET /api/v1/search/stream (SSE) -->
+                    <div class="rounded-xl border border-amber-200 overflow-hidden bg-white ring-1 ring-amber-400/20">
+                        <div
+                            class="bg-amber-50/60 px-4 py-3 border-b border-amber-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">GET</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/search/stream</code>
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-white shadow-xs">强烈推荐 (UI首选)</span>
+                            </div>
+                            <span class="text-xs text-amber-800 font-medium">步骤 1 (SSE) · 0等待秒级实时流式打字机推送</span>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <p class="text-slate-600 leading-relaxed">
+                                使用 Server-Sent Events (SSE) 协议实时流式返回搜索结果（包含 start / item / done 事件）。<strong class="text-amber-800">强烈推荐 Web 前端与小程序交互优先采用</strong>，支持客户端边检索边渲染，零卡顿提升用户体验。请求参数与 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-800">GET /api/v1/search</code> 完全一致。
+                            </p>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead class="bg-slate-50/60 border-b border-slate-200 text-slate-700 font-semibold">
+                                        <tr>
+                                            <th class="px-3 py-2" style="width:140px">参数名</th>
+                                            <th class="px-3 py-2" style="width:80px">位置</th>
+                                            <th class="px-3 py-2" style="width:80px">类型</th>
+                                            <th class="px-3 py-2" style="width:80px">必选</th>
+                                            <th class="px-3 py-2">说明</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">keyword</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 font-bold text-rose-600">必选</td>
+                                            <td class="px-3 py-2 text-slate-600">搜索关键词，例如：<code class="font-mono bg-slate-100 px-1 py-0.5 rounded">黑神话</code></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">cloud_name</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">指定筛选网盘（如 `百度`、`阿里`、`夸克`、`115` 等），支持逗号分隔或多值</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">limit</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">Integer</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">单次最大条数（受防护锁与后台预设控制）</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">scope</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">检索范围：<code class="font-mono bg-slate-100 px-1 py-0.5 rounded">own</code> (站长收益库) 或 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">all</code> (全网并发)</td>
+                                        </tr>
+                                    </tbody>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Endpoint 2: POST /api/v1/transfer -->
+                    <div class="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div
+                            class="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-blue-50 text-blue-700 border border-blue-200">POST</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/transfer</code>
+                            </div>
+                            <span class="text-xs text-slate-500 font-medium">步骤 2 · 自动转存替换 (前置测活防护)</span>
+                        </div>
+                        <div class="p-4 space-y-4 text-xs">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead
+                                        class="bg-slate-50/60 border-b border-slate-200 text-slate-700 font-semibold">
+                                        <tr>
+                                            <th class="px-3 py-2" style="width:140px">Body 属性</th>
+                                            <th class="px-3 py-2" style="width:80px">类型</th>
+                                            <th class="px-3 py-2" style="width:80px">必选</th>
+                                            <th class="px-3 py-2">说明</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">url</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 font-bold text-rose-600">必选</td>
+                                            <td class="px-3 py-2 text-slate-600">步骤 1 获取到的原始分享链接</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">title</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">资源名称标题（默认使用源标题或“未命名资源”）</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">netdisk_name</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">指定目标网盘名称（如：夸克网盘），留空则由系统智能推断</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">password</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">原始分享链接的提取码（若有）</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">skip_check</td>
+                                            <td class="px-3 py-2 text-slate-500">Boolean</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">
+                                                是否跳过前置免登录测活检查，默认 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">false</code>。保持 false 时，系统在转存前自动核验链接有效性与非空状态，异常时返回 HTTP 422 拦截。
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- HTTP 422 前置拦截说明 -->
+                            <div class="rounded-xl bg-slate-50/70 border border-slate-200/90 p-3.5 space-y-2.5">
+                                <div class="flex items-center gap-2 text-slate-800 font-bold text-xs flex-wrap">
+                                    <i class="fas fa-shield-halved text-slate-400"></i>
+                                    <span>前置测活校验拦截机制</span>
+                                    <code class="text-[11px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 font-normal">HTTP 422 Unprocessable Entity</code>
+                                </div>
+                                <p class="text-slate-600 leading-relaxed text-xs">
+                                    当未指定 <code class="font-mono text-slate-700 bg-white px-1 py-0.5 rounded border border-slate-200">skip_check=true</code> 时，若源链接存在问题，接口将直接返回 422 状态码拒绝无意义转存，保护网盘转存配额：
+                                </p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-0.5 text-xs">
+                                    <div class="bg-white p-2.5 rounded-lg border border-slate-200/80 space-y-1">
+                                        <div class="font-mono font-semibold text-slate-800 text-[11px] flex items-center gap-1.5">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                            <code>code: "LINK_INVALID"</code>
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 leading-relaxed">链接已失效、被封禁、下架或文件夹为空 (file_count = 0)</div>
+                                    </div>
+                                    <div class="bg-white p-2.5 rounded-lg border border-slate-200/80 space-y-1">
+                                        <div class="font-mono font-semibold text-slate-800 text-[11px] flex items-center gap-1.5">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                            <code>code: "LINK_LOCKED"</code>
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 leading-relaxed">链接需要提取码，请在 Body 中补充 password 字段重新提交</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Endpoint 3: POST /api/v1/link/check -->
+                    <div class="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div
+                            class="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-blue-50 text-blue-700 border border-blue-200">POST</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/link/check</code>
+                            </div>
+                            <span class="text-xs text-slate-500 font-medium">实用工具 · 网盘链接免登录测活</span>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <p class="text-slate-600 leading-relaxed">
+                                原生探测 12 大网盘（夸克、百度、阿里、UC、迅雷、123盘、天翼、115、移动云盘、联通云盘、悟空网盘、光鸭云盘），免登录实时解析资源有效性、提取码状态、以及内部文件数量。支持单条与批量两种调用模式：
+                            </p>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead
+                                        class="bg-slate-50/60 border-b border-slate-200 text-slate-700 font-semibold">
+                                        <tr>
+                                            <th class="px-3 py-2" style="width:140px">Body 属性</th>
+                                            <th class="px-3 py-2" style="width:80px">类型</th>
+                                            <th class="px-3 py-2" style="width:80px">必选</th>
+                                            <th class="px-3 py-2">说明</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">url</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-600 font-medium">单条必选</td>
+                                            <td class="px-3 py-2 text-slate-600">待检测网盘分享链接</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">password</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">提取码（若链接有密码）</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">disk_type</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">指定网盘类型，留空自动根据 URL 正则识别</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">refresh</td>
+                                            <td class="px-3 py-2 text-slate-500">Boolean</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">是否强制跳过内存缓存实时请求，默认 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">false</code></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">items</td>
+                                            <td class="px-3 py-2 text-slate-500">Array</td>
+                                            <td class="px-3 py-2 text-slate-600 font-medium">批量必选</td>
+                                            <td class="px-3 py-2 text-slate-600">
+                                                批量检测对象列表，例如：<code class="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">[{"url": "...", "password": ""}]</code>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Endpoint 4: GET /api/v1/resources -->
+                    <div class="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                        <div
+                            class="bg-slate-50/80 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">GET</span>
+                                <code class="text-sm font-bold text-slate-900">/api/v1/resources</code>
+                            </div>
+                            <span class="text-xs text-slate-500 font-medium">资产管理 · 收益资源库列表</span>
+                        </div>
+                        <div class="p-4 space-y-3 text-xs">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead
+                                        class="bg-slate-50/60 border-b border-slate-200 text-slate-700 font-semibold">
+                                        <tr>
+                                            <th class="px-3 py-2" style="width:140px">参数名</th>
+                                            <th class="px-3 py-2" style="width:80px">位置</th>
+                                            <th class="px-3 py-2" style="width:80px">类型</th>
+                                            <th class="px-3 py-2" style="width:80px">必选</th>
+                                            <th class="px-3 py-2">说明</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">page</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">Integer</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">当前页码，默认 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">1</code></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">page_size</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">Integer</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">每页条数，默认 <code class="font-mono bg-slate-100 px-1 py-0.5 rounded">10</code></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-3 py-2 font-mono font-bold text-slate-800">search</td>
+                                            <td class="px-3 py-2 font-mono text-slate-500">Query</td>
+                                            <td class="px-3 py-2 text-slate-500">String</td>
+                                            <td class="px-3 py-2 text-slate-400">可选</td>
+                                            <td class="px-3 py-2 text-slate-600">标题或链接关键字模糊筛选</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 4. 返回 JSON 数据字典 -->
+                <section id="sec-schema" class="api-doc-section scroll-mt-24 space-y-4">
+                    <h3
+                        class="text-base font-bold text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i class="fas fa-database text-teal-600"></i> 4. 返回 JSON 数据字典
+                    </h3>
+                    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead class="bg-slate-50/80 border-b border-slate-200 text-slate-700 font-semibold">
+                                <tr>
+                                    <th class="px-3.5 py-3" style="width:160px">字段名</th>
+                                    <th class="px-3.5 py-3" style="width:120px">类型</th>
+                                    <th class="px-3.5 py-3">含义与说明</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 font-normal">
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">success</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500">Boolean</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600"><code
+                                            class="text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded font-mono">true</code>
+                                        成功；<code
+                                            class="text-rose-700 bg-rose-50 px-1 py-0.5 rounded font-mono">false</code>
+                                        失败。</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">scope</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500">String</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">搜索返回作用域：<code class="font-mono">own</code>
+                                        (站长收益库) 或 <code class="font-mono">all</code> (全网)。</td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">results</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500">Array</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">搜索结果列表，包含 <code
+                                            class="font-mono">title</code>、<code
+                                            class="font-mono">share_link</code>、<code
+                                            class="font-mono">cloud_name</code>、<code class="font-mono">source</code>
+                                        以及开启测活时的健康字段。
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">health_state</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">String</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        资源健康状态枚举：
+                                        <span class="inline-block mr-2"><code class="font-mono text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded">ok</code> 正常有效</span>
+                                        <span class="inline-block mr-2"><code class="font-mono text-rose-700 bg-rose-50 px-1 py-0.5 rounded">bad</code> 失效/违规/空文件</span>
+                                        <span class="inline-block mr-2"><code class="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">locked</code> 需提取码</span>
+                                        <span class="inline-block"><code class="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">uncertain</code> 探测超时或未知</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">health_summary</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">String</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        测活中文摘要，如“<span class="text-emerald-700 font-medium">链接有效</span>”、“<span class="text-rose-700 font-medium">分享链接无效：文件列表为空</span>”。
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">file_count</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">Integer</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        分享链接内包含的文件总数。若为 <code class="font-mono text-rose-600 font-bold">0</code> 则判定为空资源下架。
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="px-3.5 py-2.5"><code
+                                            class="font-mono text-xs font-semibold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded border border-slate-200/60">code</code>
+                                    </td>
+                                    <td class="px-3.5 py-2.5 text-slate-500 font-mono">String</td>
+                                    <td class="px-3.5 py-2.5 text-slate-600">
+                                        错误状态码标识：<code class="font-mono text-rose-700 bg-rose-50 px-1 py-0.5 rounded">LINK_INVALID</code> (链接失效/空资源 422)、<code class="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">LINK_LOCKED</code> (缺少提取码 422)、<code class="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">INVALID_API_KEY</code> (鉴权失败 401)。
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 5. 多语言对接示例 -->
+                <section id="sec-snippets" class="api-doc-section scroll-mt-24 space-y-4">
+                    <h3
+                        class="text-base font-bold text-slate-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <i class="fas fa-terminal text-slate-700"></i> 5. 多语言对接代码示例
+                    </h3>
+
+                    <div class="rounded-xl overflow-hidden bg-slate-50/70 border border-slate-200 shadow-2xs">
+                        <div
+                            class="flex items-center justify-between px-4 py-2.5 bg-slate-100/70 border-b border-slate-200/80">
+                            <div class="flex items-center gap-1.5" id="snippet-tabs">
+                                <button type="button" onclick="switchSnippet('curl')"
+                                    class="snippet-tab active px-2.5 py-1 text-xs font-mono font-bold rounded bg-white text-slate-800 border border-slate-200 shadow-2xs">cURL</button>
+                                <button type="button" onclick="switchSnippet('python')"
+                                    class="snippet-tab px-2.5 py-1 text-xs font-mono font-medium rounded text-slate-500 hover:text-slate-800">Python</button>
+                                <button type="button" onclick="switchSnippet('js')"
+                                    class="snippet-tab px-2.5 py-1 text-xs font-mono font-medium rounded text-slate-500 hover:text-slate-800">Node.js</button>
+                            </div>
+                            <button type="button" onclick="copySnippetCode()"
+                                class="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1 px-2.5 py-1 rounded-md bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-all">
+                                <i class="fas fa-copy"></i>
+                                <span id="copy-text">复制代码</span>
+                            </button>
+                        </div>
+                        <pre id="snippet-code"
+                            class="p-4 text-xs font-mono text-slate-800 bg-slate-50/40 overflow-x-auto leading-relaxed"># 步骤 1: 聚合搜索
+curl -X GET "http://localhost:5004/api/v1/search?keyword=黑神话"
+
+# 步骤 2: 发起转存替换 (默认前置测活校验，若链接失效/空文件夹则返回 422 拦截)
+curl -X POST "http://localhost:5004/api/v1/transfer" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"url": "https://pan.quark.cn/s/raw123", "title": "黑神话", "skip_check": false}'</pre>
+                    </div>
+                </section>
+
+            </article>
+
+            <!-- 右侧 Sticky 本页目录 (参考 media-parser 风格) -->
+            <aside class="hidden lg:block sticky top-24 w-[200px] shrink-0">
+                <div class="space-y-4">
+                    <div class="text-sm font-semibold text-slate-900 tracking-tight pl-3.5">本页目录</div>
+                    <nav class="space-y-2.5 border-l border-slate-200/90">
+                        <a href="#sec-workflow" data-target="sec-workflow"
+                            class="doc-toc-link block pl-3.5 -ml-[1px] py-1 text-xs sm:text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors border-l-2 border-transparent leading-relaxed">1. 两步走工作流</a>
+                        <a href="#sec-auth" data-target="sec-auth"
+                            class="doc-toc-link block pl-3.5 -ml-[1px] py-1 text-xs sm:text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors border-l-2 border-transparent leading-relaxed">2. 接口鉴权机制</a>
+                        <a href="#sec-params" data-target="sec-params"
+                            class="doc-toc-link block pl-3.5 -ml-[1px] py-1 text-xs sm:text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors border-l-2 border-transparent leading-relaxed">3. 核心节点规范</a>
+                        <a href="#sec-schema" data-target="sec-schema"
+                            class="doc-toc-link block pl-3.5 -ml-[1px] py-1 text-xs sm:text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors border-l-2 border-transparent leading-relaxed">4. 返回数据字典</a>
+                        <a href="#sec-snippets" data-target="sec-snippets"
+                            class="doc-toc-link block pl-3.5 -ml-[1px] py-1 text-xs sm:text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors border-l-2 border-transparent leading-relaxed">5. 多语言对接示例</a>
+                    </nav>
+                </div>
+            </aside>
+        </div>
+
+    </div>
+</div>
+</div>
+
+<!-- ==========================================================================
+     Slide-over 侧滑调试抽屉 (Drawer)
+     ========================================================================== -->
+<div id="api-drawer-backdrop"
+    class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 transition-opacity duration-300 opacity-0 pointer-events-none"
+    onclick="closePlaygroundDrawer()"></div>
+
+<div id="api-drawer"
+    class="fixed inset-y-0 right-0 max-w-xl w-full bg-white shadow-2xl z-50 transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col"
+    role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <!-- Drawer Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+        <div class="flex items-center gap-2.5">
+            <div
+                class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200/50">
+                <i class="fas fa-flask text-xs"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900" id="drawer-title">在线接口调试 (Playground)</h3>
+        </div>
+        <button type="button"
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors text-xl leading-none"
+            onclick="closePlaygroundDrawer()" aria-label="关闭">&times;</button>
+    </div>
+
+    <!-- Drawer Body -->
+    <div class="flex-1 overflow-y-auto p-6 space-y-5 custom-scroll">
+        <div class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">选择测试接口</label>
+                <select id="drawer-pg-endpoint"
+                    class="w-full text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 font-mono focus:bg-white focus:border-blue-500 focus:outline-none transition-colors">
+                    <option value="status">GET /api/v1/status (系统运行状态)</option>
+                    <option value="search_own">GET /api/v1/search (scope=own 仅收益库)</option>
+                    <option value="search_all">GET /api/v1/search (scope=all 全网聚合)</option>
+                    <option value="transfer">POST /api/v1/transfer (测试转存替换/前置拦截)</option>
+                    <option value="link_check">POST /api/v1/link/check (单条链接免登录测活)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">关键词 / 分享 URL <span
+                        class="text-rose-500">*</span></label>
+                <input type="text" id="drawer-pg-param" value="黑神话"
+                    class="w-full text-xs rounded-xl border border-slate-300 p-2.5 font-mono focus:border-blue-500 focus:outline-none transition-colors"
+                    placeholder="输入搜索关键词或待测活/转存 URL">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">X-API-Key (转存密钥)</label>
+                <input type="text" id="drawer-pg-key" value=""
+                    class="w-full text-xs rounded-xl border border-slate-300 p-2.5 font-mono focus:border-blue-500 focus:outline-none transition-colors"
+                    placeholder="若后台设置了转存密钥请在此输入">
+            </div>
+
+            <button type="button" onclick="runDrawerPgTest()"
+                class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-2">
+                <i class="fas fa-play text-xs"></i>
+                <span>发送测试请求</span>
+            </button>
+        </div>
+
+        <!-- 结果展示框 -->
+        <div class="space-y-2 pt-3 border-t border-slate-200">
+            <div class="rounded-xl overflow-hidden bg-slate-50/70 border border-slate-200">
+                <div
+                    class="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-slate-100/70 border-b border-slate-200/80">
+                    <div class="flex items-center gap-2 flex-wrap min-w-0">
+                        <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-700 font-mono">
+                            <i class="fas fa-code text-slate-500"></i>
+                            <span>Response</span>
+                        </div>
+                        <span class="text-slate-300">·</span>
+                        <span id="drawer-pg-badge"
+                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold font-mono bg-slate-100 text-slate-600 border border-slate-200">Ready</span>
+                    </div>
+                    <button type="button"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs"
+                        onclick="copyDrawerOutput()">
+                        <i class="fas fa-copy"></i>
+                        <span id="drawer-copy-text">复制 JSON</span>
+                    </button>
+                </div>
+                <pre id="drawer-pg-output"
+                    class="p-3.5 text-xs font-mono text-slate-800 bg-slate-50/40 overflow-x-auto leading-relaxed min-h-[180px] max-h-[350px] whitespace-pre-wrap custom-scroll">// 点击“发送测试请求”在此查看真实响应数据</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div aria-live="polite" aria-atomic="true" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='js/utils.js') }}?v=2.0.7"></script>
+<script src="{{ url_for('static', filename='js/system_config.js') }}?v=2.0.7"></script>
+<script>
+    function switchApiTab(targetTab) {
+        const container = document.getElementById('apiConfigContainer');
+        if (container) {
+            if (targetTab === 'docs') {
+                container.classList.remove('max-w-4xl');
+                container.classList.add('max-w-7xl');
+            } else {
+                container.classList.remove('max-w-7xl');
+                container.classList.add('max-w-4xl');
+            }
+        }
+
+        document.querySelectorAll('.source-tab-btn').forEach(btn => {
+            if (btn.getAttribute('data-api-tab-target') === targetTab) {
+                btn.classList.add('is-active');
+            } else {
+                btn.classList.remove('is-active');
+            }
+        });
+
+        document.querySelectorAll('.api-tab-pane').forEach(pane => {
+            pane.classList.add('hidden');
+        });
+
+        const targetPane = document.getElementById(`tab-pane-${targetTab}`);
+        if (targetPane) {
+            targetPane.classList.remove('hidden');
+        }
+
+        // 更新 URL 参数但不刷新页面
+        const url = new URL(window.location);
+        url.searchParams.set('tab', targetTab);
+        window.history.replaceState({}, '', url);
+
+        if (targetTab === 'docs' && typeof window.updateDocTocActive === 'function') {
+            setTimeout(window.updateDocTocActive, 60);
+        }
+    }
+
+    // --- TOC ScrollSpy 联动高亮 ---
+    function initDocTocScrollSpy() {
+        const sections = Array.from(document.querySelectorAll('.api-doc-section'));
+        const tocLinks = Array.from(document.querySelectorAll('.doc-toc-link'));
+        if (!sections.length || !tocLinks.length) return;
+
+        let isManualScroll = false;
+        let manualScrollTimer = null;
+
+        function setActiveToc(activeId) {
+            tocLinks.forEach(link => {
+                const targetId = link.getAttribute('data-target');
+                if (targetId === activeId) {
+                    link.classList.add('text-blue-600', 'font-semibold', 'border-blue-600', 'bg-blue-50/70', 'rounded-r-md');
+                    link.classList.remove('text-slate-500', 'font-medium', 'border-transparent');
+                } else {
+                    link.classList.remove('text-blue-600', 'font-semibold', 'border-blue-600', 'bg-blue-50/70', 'rounded-r-md');
+                    link.classList.add('text-slate-500', 'font-medium', 'border-transparent');
+                }
+            });
+        }
+
+        function updateDocTocActive() {
+            if (isManualScroll) return;
+            const docsTab = document.getElementById('tab-pane-docs');
+            if (docsTab && docsTab.classList.contains('hidden')) return;
+
+            const focusLine = 170; // 视口判定基准线（像素）
+            let currentSection = sections[0];
+
+            for (const sec of sections) {
+                const rect = sec.getBoundingClientRect();
+                if (rect.top <= focusLine && rect.bottom > focusLine) {
+                    currentSection = sec;
+                    break;
+                } else if (rect.top <= focusLine) {
+                    currentSection = sec;
+                }
+            }
+
+            if (currentSection) {
+                setActiveToc(currentSection.id);
+            }
+        }
+
+        const scrollTarget = document.querySelector('main.admin-main') || window;
+        scrollTarget.addEventListener('scroll', updateDocTocActive, { passive: true });
+        window.addEventListener('scroll', updateDocTocActive, { passive: true });
+        window.addEventListener('resize', updateDocTocActive, { passive: true });
+
+        tocLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetId = link.getAttribute('data-target');
+                const targetEl = document.getElementById(targetId);
+                if (targetEl) {
+                    isManualScroll = true;
+                    setActiveToc(targetId);
+
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    history.replaceState(null, '', `#${targetId}`);
+
+                    clearTimeout(manualScrollTimer);
+                    manualScrollTimer = setTimeout(() => {
+                        isManualScroll = false;
+                        updateDocTocActive();
+                    }, 600);
+                }
+            });
+        });
+
+        window.updateDocTocActive = updateDocTocActive;
+        setTimeout(updateDocTocActive, 80);
+    }
+
+    // --- Playground Drawer 逻辑 ---
+    function openPlaygroundDrawer() {
+        const backdrop = document.getElementById('api-drawer-backdrop');
+        const drawer = document.getElementById('api-drawer');
+        if (!backdrop || !drawer) return;
+        backdrop.classList.remove('opacity-0', 'pointer-events-none');
+        backdrop.classList.add('opacity-100');
+        drawer.classList.remove('translate-x-full');
+    }
+
+    function closePlaygroundDrawer() {
+        const backdrop = document.getElementById('api-drawer-backdrop');
+        const drawer = document.getElementById('api-drawer');
+        if (!backdrop || !drawer) return;
+        backdrop.classList.remove('opacity-100');
+        backdrop.classList.add('opacity-0', 'pointer-events-none');
+        drawer.classList.add('translate-x-full');
+    }
+
+    // 监听 URL hash 是否为 #sec-playground，若是自动呼出抽屉
+    window.addEventListener('DOMContentLoaded', () => {
+        initDocTocScrollSpy();
+        if (window.location.hash === '#sec-playground') {
+            openPlaygroundDrawer();
+        }
+    });
+
+    const hostOrigin = (typeof window !== 'undefined' && window.location.origin) ? window.location.origin : "http://localhost:5004";
+
+    const SNIPPETS = {
+        curl: `# 步骤 1: 聚合搜索
+curl -X GET "${hostOrigin}/api/v1/search?keyword=黑神话"
+
+# 步骤 2: 发起转存替换 (默认前置测活校验，若链接失效/空文件夹则返回 422 拦截)
+curl -X POST "${hostOrigin}/api/v1/transfer" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{"url": "https://pan.quark.cn/s/raw123", "title": "黑神话", "skip_check": false}'`,
+        python: `import requests
+
+BASE_URL = "${hostOrigin}"
+API_KEY = "YOUR_API_KEY"
+
+# 步骤 1: 聚合搜索
+search_res = requests.get(f"{BASE_URL}/api/v1/search", params={
+    "keyword": "黑神话"
+}).json()
+print("有效资源列表:", search_res)
+
+# 步骤 2: 发起转存替换 (若原链接失效/空资源将触发 HTTP 422 拦截)
+transfer_res = requests.post(
+    f"{BASE_URL}/api/v1/transfer",
+    headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+    json={"url": "https://pan.quark.cn/s/raw123", "title": "黑神话", "skip_check": False}
+)
+if transfer_res.status_code == 422:
+    print("前置测活拦截失败:", transfer_res.json())
+else:
+    print("转存成功:", transfer_res.json())`,
+        js: `const BASE_URL = "${hostOrigin}";
+const API_KEY = "YOUR_API_KEY";
+
+// 步骤 1: 聚合搜索有效资源
+const searchRes = await fetch(
+  \`\${BASE_URL}/api/v1/search?keyword=\${encodeURIComponent("黑神话")}\`
+);
+const searchData = await searchRes.json();
+console.log("有效资源:", searchData);
+
+// 步骤 2: 触发转存替换 (前置校验失效或空资源返回 HTTP 422)
+const transferRes = await fetch(\`\${BASE_URL}/api/v1/transfer\`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-API-Key": API_KEY
+  },
+  body: JSON.stringify({
+    url: "https://pan.quark.cn/s/raw123",
+    title: "黑神话",
+    skip_check: false
+  })
+});
+const transferData = await transferRes.json();
+console.log("转存结果 (422 为死链拦截):", transferData);`
+    };
+
+    function switchSnippet(lang) {
+        document.querySelectorAll('.snippet-tab').forEach(tab => {
+            tab.className = 'snippet-tab px-2.5 py-1 text-xs font-mono font-medium rounded text-slate-500 hover:text-slate-800';
+        });
+        if (event && event.target) {
+            event.target.className = 'snippet-tab active px-2.5 py-1 text-xs font-mono font-bold rounded bg-white text-slate-800 border border-slate-200 shadow-2xs';
+        }
+        document.getElementById('snippet-code').textContent = SNIPPETS[lang] || "";
+    }
+
+    function copySnippetCode() {
+        const code = document.getElementById('snippet-code').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            const btnText = document.getElementById('copy-text');
+            btnText.textContent = '已复制!';
+            setTimeout(() => { btnText.textContent = '复制代码'; }, 2000);
+        });
+    }
+
+    function copyDrawerOutput() {
+        const code = document.getElementById('drawer-pg-output').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            const btnText = document.getElementById('drawer-copy-text');
+            if (btnText) {
+                btnText.textContent = '已复制!';
+                setTimeout(() => { btnText.textContent = '复制 JSON'; }, 2000);
+            }
+        });
+    }
+
+    async function runDrawerPgTest() {
+        const endpoint = document.getElementById('drawer-pg-endpoint').value;
+        const param = document.getElementById('drawer-pg-param').value.trim();
+        const apiKey = document.getElementById('drawer-pg-key').value.trim();
+        const outputEl = document.getElementById('drawer-pg-output');
+        const badge = document.getElementById('drawer-pg-badge');
+
+        outputEl.textContent = "// 正在请求后端...";
+        badge.textContent = "Sending...";
+        badge.className = "px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 font-bold";
+
+        let url = "";
+        let method = "GET";
+        let headers = {};
+        let body = null;
+
+        if (apiKey) {
+            headers["X-API-Key"] = apiKey;
+        }
+
+        if (endpoint === "status") {
+            url = "/api/v1/status";
+        } else if (endpoint === "search_own") {
+            url = `/api/v1/search?keyword=${encodeURIComponent(param || "黑神话")}&scope=own`;
+        } else if (endpoint === "search_all") {
+            url = `/api/v1/search?keyword=${encodeURIComponent(param || "黑神话")}&scope=all`;
+        } else if (endpoint === "transfer") {
+            url = "/api/v1/transfer";
+            method = "POST";
+            headers["Content-Type"] = "application/json";
+            body = JSON.stringify({
+                url: param || "https://pan.quark.cn/s/sample_link",
+                title: "测试资源",
+                netdisk_name: "夸克网盘"
+            });
+        } else if (endpoint === "link_check") {
+            url = "/api/v1/link/check";
+            method = "POST";
+            headers["Content-Type"] = "application/json";
+            body = JSON.stringify({
+                url: param || "https://pan.quark.cn/s/sample_link",
+                refresh: true
+            });
+        }
+
+        try {
+            const res = await fetch(url, { method, headers, body });
+            const json = await res.json();
+            badge.textContent = `${res.status} ${res.statusText}`;
+            badge.className = res.ok
+                ? "px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold"
+                : "px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-bold";
+
+            outputEl.textContent = JSON.stringify(json, null, 2);
+        } catch (err) {
+            badge.textContent = "Error";
+            badge.className = "px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-bold";
+            outputEl.textContent = `// 请求发生异常: ${err.message}`;
+        }
+    }
+</script>
+{% endblock %}
